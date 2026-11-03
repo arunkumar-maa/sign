@@ -1,0 +1,12 @@
+# SignBridge AI — Optional Requirements
+
+# For full Blender Python automation (requires Blender installation or bpy wheel)
+# bpy==4.1.0
+
+# For GPU-accelerated Whisper or TensorFlow (requires CUDA 12.x and cuDNN on WSL2/Linux)
+# torch==2.4.0
+# torchaudio==2.4.0
+
+# Optional TLive-Omni vLLM integration (requires Linux / WSL2 and compatible GPU)
+# vllm>=0.4.0
+

@@ -1,0 +1,31 @@
+{
+  "_schema_version": "1.0",
+  "_note": "Only entries with status='verified' will be played by the application. All others show the unavailable message.",
+  "animations": [
+    {
+      "gesture": "HELLO",
+      "animation_path": "assets/animations/hello.mp4",
+      "source": "Skeleton replay from Amrita SLR ISL dataset CC BY 4.0 (pending download)",
+      "license": "CC BY 4.0",
+      "verified_by": "pending_isl_reviewer",
+      "status": "pending",
+      "_note": "Will be updated to 'verified' after ISL expert review and clip is generated."
+    },
+    {
+      "gesture": "THANK YOU",
+      "animation_path": "assets/animations/thank_you.mp4",
+      "source": "Skeleton replay from Amrita SLR ISL dataset CC BY 4.0 (pending download)",
+      "license": "CC BY 4.0",
+      "verified_by": "pending_isl_reviewer",
+      "status": "pending"
+    },
+    {
+      "gesture": "HELP",
+      "animation_path": "assets/animations/help.mp4",
+      "source": "Skeleton replay from Amrita SLR ISL dataset CC BY 4.0 (pending download)",
+      "license": "CC BY 4.0",
+      "verified_by": "pending_isl_reviewer",
+      "status": "pending"
+    }
+  ]
+}

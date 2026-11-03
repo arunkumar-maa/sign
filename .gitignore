@@ -1,0 +1,63 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+
+# Raw and processed datasets (large files)
+data/raw/
+data/processed/
+data/splits/
+data/reports/
+data/isl_signs/
+data/*.db
+data/*.sqlite
+
+# Reference repositories (cloned separately)
+references/
+
+# Large model files
+*.keras
+*.h5
+*.task
+*.npz
+models/static/*.keras
+models/static/*.h5
+models/dynamic/*.keras
+models/dynamic/*.h5
+models/mediapipe/*.task
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Audio temp files
+assets/audio/temp_*.mp3
+assets/audio/temp_*.wav
+
+# Logs
+*.log
+logs/
+
+# Build
+dist/
+build/
+*.egg-info/
