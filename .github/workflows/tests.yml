@@ -35,3 +35,4 @@ jobs:
     - name: Run Core and Repaired Test Suites
       run: |
         python -m pytest tests/test_alphabet_and_numbers_suite.py tests/test_final_repair_verification.py tests/test_character_builder.py tests/test_feature_schema.py tests/test_isl_data_collection.py tests/test_live_pipeline_repaired.py tests/test_recognition_repaired.py -v
+

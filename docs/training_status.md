@@ -29,13 +29,13 @@ Both active SignBridge AI models share a standardized feature extraction and tem
 - **Dataset:** Official ISLRTC master signer videos (`silentone0725/Indian_Sign_Language_Data.gov_Rencoded`)
 - **Total Master Samples:** 10 canonical sequences (1 per digit 0–9)
 - **Signer Provenance:** Exactly 1 human master signer (`islrtc_master`). Artificial synthetic signers (`signer_sim_*`) have been completely removed.
-- **Training Strategy:** Canonical samples with post-split spatial regularization (130 augmented training sequences, 10 validation, 10 test).
+- **Training Strategy:** Canonical samples with spatial augmentation strictly applied to training (130 augmented training sequences, 0 val, 0 test) to prevent train/test data leakage on the single master seed.
 - **Hyperparameters:**
   - Optimizer: Adam ($lr = 0.001$)
   - Loss: Sparse Categorical Crossentropy
   - Batch Size: 16
   - Architecture: Input(30, 282) $\rightarrow$ BiLSTM(64) $\rightarrow$ Dropout(0.3) $\rightarrow$ Dense(64, ReLU) $\rightarrow$ Dropout(0.2) $\rightarrow$ Dense(10, Softmax)
-- **Evaluation Status:** Transparently reported as single-signer stratified split (`is_signer_independent: false`). Multi-signer benchmark requires recording $\ge 3$ signers via `isl_data_collection`.
+- **Evaluation Status:** Transparently reported as `evaluation_status: "not_evaluated_insufficient_independent_samples"` (`test_accuracy: null`, `is_signer_independent: false`). Multi-signer benchmark requires recording $\ge 3$ signers via `isl_data_collection`.
 - **Artifacts Saved:** `models/isl_number_model.keras`, `models/number/hand_sequence_lstm.keras`, `models/number_labels.json`, `models/number/evaluation.json`
 
 ---

@@ -99,7 +99,7 @@ def verify_models() -> Dict[str, Any]:
                     ldata = json.load(f)
                 lbl_classes = ldata.get("classes") or ldata.get("labels", [])
                 if lbl_classes != EXPECTED_ALPHABET_CLASSES:
-                    logger.warning("Alphabet label file classes mismatch: %s vs expected %s", lbl_classes, EXPECTED_ALPHABET_CLASSES)
+                    raise ValueError(f"Alphabet label classes mismatch: {lbl_classes} vs expected {EXPECTED_ALPHABET_CLASSES}")
 
             status["alphabet"] = {
                 "available": True,
@@ -113,7 +113,7 @@ def verify_models() -> Dict[str, Any]:
             logger.error("Alphabet Model: INCOMPATIBLE SCHEMA: %s", ime)
         except Exception as e:
             status["alphabet"] = {"available": False, "error": str(e)}
-            logger.error("Alphabet Model: FAILED LOADING: %s", e)
+            logger.error("Alphabet Model: FAILED LOADING OR VALIDATION: %s", e)
     else:
         status["alphabet"] = {
             "available": False,
@@ -138,7 +138,7 @@ def verify_models() -> Dict[str, Any]:
                     ldata = json.load(f)
                 lbl_classes = ldata.get("classes") or ldata.get("labels", [])
                 if lbl_classes != EXPECTED_NUMBER_CLASSES:
-                    logger.warning("Number label file classes mismatch: %s vs expected %s", lbl_classes, EXPECTED_NUMBER_CLASSES)
+                    raise ValueError(f"Number label classes mismatch: {lbl_classes} vs expected {EXPECTED_NUMBER_CLASSES}")
 
             status["numbers"] = {
                 "available": True,
@@ -152,7 +152,7 @@ def verify_models() -> Dict[str, Any]:
             logger.error("Number Model: INCOMPATIBLE SCHEMA: %s", ime)
         except Exception as e:
             status["numbers"] = {"available": False, "error": str(e)}
-            logger.error("Number Model: FAILED LOADING: %s", e)
+            logger.error("Number Model: FAILED LOADING OR VALIDATION: %s", e)
     else:
         status["numbers"] = {
             "available": False,
@@ -171,22 +171,35 @@ def main():
     args = parser.parse_args()
 
     logger.info("Step 1: Checking MediaPipe Tasks asset...")
-    download_mediapipe_task()
+    mp_ok = download_mediapipe_task()
+    if not mp_ok:
+        logger.error("MediaPipe Tasks asset setup failed. Camera landmark tracking may be degraded.")
 
     logger.info("Step 2: Checking trained Keras models...")
     status = verify_models()
 
     if args.train:
+        trained_any = False
         if not status["alphabet"]["available"]:
             logger.info("Training missing alphabet model programmatically...")
             from scripts.train_alphabet import train_alphabet_model
             train_alphabet_model()
+            trained_any = True
         if not status["numbers"]["available"]:
             logger.info("Training missing numbers model programmatically...")
             from scripts.train_numbers import train_number_model
             train_number_model()
+            trained_any = True
 
-    logger.info("Setup and verification complete.")
+        if trained_any:
+            logger.info("Step 3: Re-verifying models post-training...")
+            status = verify_models()
+
+    all_models_ready = status["alphabet"].get("available", False) and status["numbers"].get("available", False)
+    if all_models_ready:
+        logger.info("Setup and verification complete: All models and assets are ready.")
+    else:
+        logger.info("Setup complete with warnings: Some model assets require training before offline inference.")
 
 
 if __name__ == "__main__":

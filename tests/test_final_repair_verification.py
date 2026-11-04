@@ -44,7 +44,8 @@ from isl_data_collection.storage import validate_label
 # ── Area 1: Artificial Signers Purged & Manifest Cleanliness ─────────────────
 def test_artificial_signers_purged_from_manifest():
     manifest_path = PROJECT_ROOT / "data" / "isl_signs" / "landmarks.jsonl"
-    assert manifest_path.exists(), "Manifest landmarks.jsonl must exist."
+    if not manifest_path.exists():
+        pytest.skip("Personal dataset landmarks.jsonl absent on clean clone")
 
     with open(manifest_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -58,6 +59,9 @@ def test_artificial_signers_purged_from_manifest():
 # ── Area 2: No Zero-Filled Landmark Sequences in Active Manifest ─────────────
 def test_no_zero_filled_sequences_in_active_manifest():
     manifest_path = PROJECT_ROOT / "data" / "isl_signs" / "landmarks.jsonl"
+    if not manifest_path.exists():
+        pytest.skip("Personal dataset landmarks.jsonl absent on clean clone")
+
     with open(manifest_path, "r", encoding="utf-8") as f:
         for line in f:
             if not line.strip():
@@ -70,13 +74,22 @@ def test_no_zero_filled_sequences_in_active_manifest():
                     feat_path = PROJECT_ROOT / feat_rel
                     if feat_path.exists():
                         arr = np.load(feat_path)["features"]
-                        # Landmark coordinates must not be all-zeros for valid active samples
-                        assert not np.all(arr[:, :63] == 0.0), f"Sample {rec.get('sample_id')} has all-zero coordinates"
+                        # Verify active hand coordinates are not all-zeros
+                        left_present = np.any(arr[:, 280] > 0.0)
+                        right_present = np.any(arr[:, 281] > 0.0)
+                        assert left_present or right_present, f"Sample {rec.get('sample_id')} has neither hand present"
+                        if left_present:
+                            assert not np.all(arr[:, :63] == 0.0), f"Sample {rec.get('sample_id')} claims left hand present but coordinates are all zeros"
+                        if right_present:
+                            assert not np.all(arr[:, 140:203] == 0.0), f"Sample {rec.get('sample_id')} claims right hand present but coordinates are all zeros"
 
 
 # ── Area 3: Standard Manifest Schema For Active Classes ───────────────────────
 def test_standard_manifest_schema_active_classes():
     manifest_path = PROJECT_ROOT / "data" / "isl_signs" / "landmarks.jsonl"
+    if not manifest_path.exists():
+        pytest.skip("Personal dataset landmarks.jsonl absent on clean clone")
+
     with open(manifest_path, "r", encoding="utf-8") as f:
         for line in f:
             if not line.strip():
@@ -88,6 +101,40 @@ def test_standard_manifest_schema_active_classes():
                 assert "label" in rec
                 assert "signer_id" in rec
                 assert "features_path" in rec
+
+
+def test_manifest_schema_and_idempotence_clean_clone(tmp_path):
+    """Verifies manifest schema and idempotent upserting on clean clones."""
+    from isl_data_collection.storage import upsert_landmark_record, read_jsonl
+    test_manifest = tmp_path / "landmarks.jsonl"
+
+    rec_a = {
+        "sample_id": "test_alpha_a",
+        "category": "alphabet",
+        "label": "A",
+        "signer_id": "signer_01",
+        "features_path": "data/isl_signs/features/alphabet_test_a.npz",
+    }
+    rec_0 = {
+        "sample_id": "test_num_0",
+        "category": "number",
+        "label": "0",
+        "signer_id": "islrtc_master",
+        "features_path": "data/isl_signs/features/number_test_0.npz",
+    }
+    # Initial insertion returns True
+    assert upsert_landmark_record(rec_a, path=test_manifest) is True
+    assert upsert_landmark_record(rec_0, path=test_manifest) is True
+
+    # Duplicate insertion returns False (idempotent, no duplicates added)
+    assert upsert_landmark_record(rec_a, path=test_manifest) is False
+    assert upsert_landmark_record(rec_0, path=test_manifest) is False
+
+    rows = read_jsonl(test_manifest)
+    assert len(rows) == 2
+    for r in rows:
+        assert all(k in r for k in ["sample_id", "category", "label", "signer_id", "features_path"])
+        assert not str(r["signer_id"]).startswith("signer_sim_")
 
 
 # ── Area 4: Top-Two Margin Gating in Alphabet Recognizer ──────────────────────
@@ -176,22 +223,44 @@ def test_model_output_dimensions_exact():
 
 # ── Area 7: Continuous Dynamic Motion Signs (J & Z Trajectories) ──────────────
 def test_dynamic_motion_gesture_trajectories():
-    # Simulate a dynamic 'J' gesture (downward scoop motion across 30 frames)
+    # Simulate a dynamic 'J' gesture (downward scoop motion across 30 frames) with right hand
     t = np.linspace(0, 1, 30)
-    traj_seq = np.zeros((30, 282), dtype=np.float32)
-    # Right hand index fingertip (joint 8: coords 24, 25, 26) tracing a hook curve
-    traj_seq[:, 24] = np.cos(t * np.pi) * 0.2
-    traj_seq[:, 25] = np.sin(t * np.pi) * 0.4
-    traj_seq[:, 281] = 1.0  # Right hand present
+    traj_j = np.zeros((30, 282), dtype=np.float32)
+    # Right hand index fingertip (joint 8: coords 164, 165, 166 in 282-dim schema)
+    traj_j[:, 164] = 0.5 + np.cos(t * np.pi) * 0.15  # x curve
+    traj_j[:, 165] = 0.2 + (t ** 1.5) * 0.4          # y downward stroke + hook
+    traj_j[:, 166] = 0.0                             # z depth
+    traj_j[:, 281] = 1.0                             # Right hand present flag
 
-    resampled = resample_sequence(traj_seq, target_length=30)
-    assert resampled.shape == (30, 282)
-    assert validate_sequence(resampled) is True
+    resampled_j = resample_sequence(traj_j, target_length=30)
+    assert resampled_j.shape == (30, 282)
+    assert validate_sequence(resampled_j) is True
 
-    # Test motion energy detection across the dynamic gesture
-    diffs = np.diff(traj_seq[:, :63], axis=0)
-    motion_energy = float(np.sum(np.abs(diffs)))
-    assert motion_energy > 0.5, "Dynamic gesture trajectory should have non-zero motion energy"
+    # Test motion energy detection across the dynamic gesture in the active hand slot
+    diffs_j = np.diff(traj_j[:, 140:203], axis=0)
+    motion_energy_j = float(np.sum(np.abs(diffs_j)))
+    assert motion_energy_j > 0.5, "Dynamic J trajectory should exhibit substantial motion energy"
+
+    # Simulate a dynamic 'Z' gesture (zigzag strokes: top bar -> diagonal -> bottom bar)
+    traj_z = np.zeros((30, 282), dtype=np.float32)
+    traj_z[:, 281] = 1.0  # Right hand present
+    # Segment 1 (frames 0-9): top bar left to right
+    traj_z[:10, 164] = np.linspace(0.3, 0.7, 10)
+    traj_z[:10, 165] = 0.3
+    # Segment 2 (frames 10-19): diagonal right-top to left-bottom
+    traj_z[10:20, 164] = np.linspace(0.7, 0.3, 10)
+    traj_z[10:20, 165] = np.linspace(0.3, 0.7, 10)
+    # Segment 3 (frames 20-29): bottom bar left to right
+    traj_z[20:, 164] = np.linspace(0.3, 0.7, 10)
+    traj_z[20:, 165] = 0.7
+
+    assert validate_sequence(traj_z) is True
+    diffs_z = np.diff(traj_z[:, 140:203], axis=0)
+    assert float(np.sum(np.abs(diffs_z))) > 1.0, "Dynamic Z trajectory should have strong multi-stroke motion energy"
+
+    # Verify temporal directionality: forward J != time-reversed J
+    traj_j_reversed = np.flip(traj_j, axis=0)
+    assert not np.allclose(traj_j, traj_j_reversed), "Temporal sequence must preserve motion directionality"
 
 
 # ── Area 8: ISL Data Collection Categories Strictly Alphabet & Number ─────────
@@ -277,3 +346,6 @@ def test_scientific_honesty_in_reports():
         if data.get("signer_count", 1) < 3:
             assert data.get("is_signer_independent") is False
             assert "ISLRTC" in data.get("note", "")
+            if data.get("total_samples", 0) <= 10:
+                assert data.get("test_accuracy") is None
+                assert data.get("evaluation_status") == "not_evaluated_insufficient_independent_samples"

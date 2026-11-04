@@ -83,5 +83,47 @@ def append_sample(record: dict[str, Any]) -> None:
     append_jsonl(SAMPLES_MANIFEST, record)
 
 
+def upsert_landmark_record(record: dict[str, Any], path: Path = LANDMARK_MANIFEST) -> bool:
+    """
+    Insert or update a record in the landmark manifest JSONL by `sample_id`.
+    Returns True if a new record was added or existing record was updated, False if identical.
+    Guarantees idempotence: running import multiple times never creates duplicates.
+    """
+    sample_id = record.get("sample_id")
+    if not sample_id:
+        append_jsonl(path, record)
+        return True
+
+    with _LOCK:
+        existing_rows = read_jsonl(path)
+        updated = False
+        found = False
+        new_rows = []
+        for row in existing_rows:
+            if row.get("sample_id") == sample_id:
+                found = True
+                if row != record:
+                    new_rows.append(record)
+                    updated = True
+                else:
+                    new_rows.append(row)
+            else:
+                new_rows.append(row)
+
+        if not found:
+            new_rows.append(record)
+            updated = True
+
+        if updated:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("w", encoding="utf-8") as handle:
+                for r in new_rows:
+                    handle.write(json.dumps(r, ensure_ascii=False) + "\n")
+        return updated
+
+
 def append_landmark_record(record: dict[str, Any]) -> None:
-    append_jsonl(LANDMARK_MANIFEST, record)
+    if record.get("sample_id"):
+        upsert_landmark_record(record)
+    else:
+        append_jsonl(LANDMARK_MANIFEST, record)

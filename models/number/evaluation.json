@@ -1,19 +1,20 @@
 {
+  "evaluation_status": "not_evaluated_insufficient_independent_samples",
   "is_signer_independent": false,
   "signer_count": 1,
   "signers": [
     "islrtc_master"
   ],
-  "split_type": "single_signer_stratified",
-  "note": "ISLRTC official Data.gov dataset provides 1 human master signer for digits 0-9. To perform a genuine signer-independent benchmark, record >= 3 distinct signers using the isl_data_collection module.",
+  "split_type": "augmented_training_only_insufficient_samples",
+  "note": "ISLRTC official Data.gov dataset provides 1 human master signer for digits 0-9 (10 samples total). To prevent train/test data leakage, no evaluation was performed on training samples. A reliable generalisation benchmark requires collecting at least 30 independent original recordings (minimum 3 per class) or >= 3 distinct human signers using the isl_data_collection tool.",
   "sample_counts": {
     "total_raw": 10,
-    "train": 130,
-    "val": 10,
-    "test": 10
+    "train_augmented": 130,
+    "val": 0,
+    "test": 0
   },
-  "test_accuracy": 1.0,
-  "test_loss": 0.010664863511919975,
+  "test_accuracy": null,
+  "test_loss": null,
   "present_classes": [
     "0",
     "1",
@@ -27,5 +28,5 @@
     "9"
   ],
   "missing_classes": [],
-  "epochs_completed": 10
+  "epochs_completed": 5
 }

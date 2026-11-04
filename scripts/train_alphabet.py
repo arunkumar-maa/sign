@@ -3,6 +3,7 @@ SignBridge AI — Dedicated Alphabet / Fingerspelling Model Training Script (A�
 Trains a Bidirectional LSTM classifier for Indian Sign Language English Alphabet (26 classes).
 Strictly uses backend/vision/feature_schema.py (v2.0.0, 282 dimensions, 30 frames).
 Enforces genuine signer-independent train, validation, and test splits without random clip fallbacks.
+Enforces complete class coverage across all 26 alphabet classes (A–Z).
 """
 
 import argparse
@@ -106,7 +107,7 @@ def build_alphabet_model(num_classes: int = 26):
 def train_alphabet_model(epochs: int = 25, batch_size: int = 16) -> Dict[str, Any]:
     """
     Programmatic entry point for training the ISL Alphabet (A-Z) model.
-    Enforces genuine signer-independent splits without argparse or sys.argv conflicts.
+    Enforces genuine signer-independent splits and complete 26-class coverage.
     """
     X, y, signers = load_dataset()
     if len(X) == 0:
@@ -121,13 +122,6 @@ def train_alphabet_model(epochs: int = 25, batch_size: int = 16) -> Dict[str, An
             f"Insufficient signer IDs: genuine signer-independent training requires at least 3 distinct signer IDs "
             f"(found {len(unique_signers)}: {unique_signers}). Random train_test_split fallback is prohibited."
         )
-
-    # Check class coverage
-    present_classes = sorted(set(y.tolist()))
-    missing = [c for i, c in enumerate(ALPHABET_CLASSES) if i not in present_classes]
-    logger.info("Present classes (%d/26): %s", len(present_classes), [ID_TO_LABEL[i] for i in present_classes])
-    if missing:
-        logger.warning("Missing classes (%d): %s", len(missing), missing)
 
     # Genuine 3-way signer-independent partitioning (Train, Validation, Test)
     signers_arr = np.asarray(signers)
@@ -146,17 +140,33 @@ def train_alphabet_model(epochs: int = 25, batch_size: int = 16) -> Dict[str, An
     if np.sum(test_mask) == 0:
         raise ValueError(f"No test samples for signer: {test_signer}")
 
-    X_train, y_train = X[train_mask], y[train_mask]
-    X_val, y_val = X[val_mask], y[val_mask]
-    X_test, y_test = X[test_mask], y[test_mask]
+    # Enforce complete class coverage: all 26 classes A-Z must be present in training
+    train_classes = set(y[train_mask].tolist())
+    missing_train = [ID_TO_LABEL[c] for c in range(len(ALPHABET_CLASSES)) if c not in train_classes]
+    if missing_train:
+        err_msg = (
+            f"Incomplete alphabet training coverage: classes {missing_train} are missing from the training partition "
+            f"(signers: {train_signers}). All 26 classes (A-Z) must be present in training. "
+            f"Collect additional training clips for missing classes using the data collection tool."
+        )
+        logger.error(err_msg)
+        raise ValueError(err_msg)
 
     # Inspect per-class test set representation
+    test_classes = set(y[test_mask].tolist())
+    missing_test = [ID_TO_LABEL[c] for c in range(len(ALPHABET_CLASSES)) if c not in test_classes]
+    complete_test_coverage = (len(missing_test) == 0)
+
     per_class_test_samples: Dict[str, int] = {}
     for c in range(len(ALPHABET_CLASSES)):
         cnt = int(np.sum((y == c) & test_mask))
         per_class_test_samples[ID_TO_LABEL[c]] = cnt
         if cnt == 0:
             logger.warning("Alphabet class %s has 0 test samples on held-out signer %s!", ID_TO_LABEL[c], test_signer)
+
+    X_train, y_train = X[train_mask], y[train_mask]
+    X_val, y_val = X[val_mask], y[val_mask]
+    X_test, y_test = X[test_mask], y[test_mask]
 
     logger.info("Signer-Independent Split: Train Signers %s (%d samples), Val Signer %s (%d samples), Test Signer %s (%d samples)",
                 train_signers, len(X_train), val_signer, len(X_val), test_signer, len(X_test))
@@ -207,6 +217,8 @@ def train_alphabet_model(epochs: int = 25, batch_size: int = 16) -> Dict[str, An
     eval_data = {
         "is_signer_independent": True,
         "split_type": "signer_independent",
+        "complete_class_test_coverage": complete_test_coverage,
+        "missing_test_classes": missing_test,
         "signer_split": {
             "train_signers": train_signers,
             "val_signers": [val_signer],
@@ -221,8 +233,7 @@ def train_alphabet_model(epochs: int = 25, batch_size: int = 16) -> Dict[str, An
         "per_class_test_samples": per_class_test_samples,
         "test_accuracy": float(test_acc),
         "test_loss": float(test_loss),
-        "present_classes": [ID_TO_LABEL[i] for i in present_classes],
-        "missing_classes": missing,
+        "present_train_classes": sorted(list(train_classes)),
         "epochs_completed": len(history.history.get("loss", [])),
     }
     EVAL_REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)

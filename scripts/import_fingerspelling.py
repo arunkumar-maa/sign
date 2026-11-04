@@ -36,7 +36,7 @@ from isl_data_collection.config import (
     SEQUENCE_LENGTH,
 )
 from isl_data_collection.hand_landmarks import ensure_hand_task_model, result_to_features
-from isl_data_collection.storage import append_landmark_record
+from isl_data_collection.storage import append_landmark_record, upsert_landmark_record
 from backend.vision.feature_schema import resample_sequence, validate_sequence
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -247,7 +247,7 @@ def build_fingerspelling_dataset(
                 "end_frame": end_f,
             }
             records.append(rec)
-            append_landmark_record(rec)
+            upsert_landmark_record(rec)
 
     detector.close()
     logger.info("Successfully registered %d character instances across all letters.", len(records))

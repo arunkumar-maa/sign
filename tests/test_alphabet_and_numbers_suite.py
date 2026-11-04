@@ -89,6 +89,36 @@ def test_3_shared_feature_extraction():
     assert count == 2
     assert full_feat[-2] == 1.0
     assert full_feat[-1] == 1.0
+    assert validate_features(full_feat) is True
+
+    # Left-hand only present
+    feat_left, count_l = extract_features_from_arrays(mock_pts, None)
+    assert feat_left.shape == (282,)
+    assert count_l == 1
+    assert feat_left[-2] == 1.0
+    assert feat_left[-1] == 0.0
+    assert not np.all(feat_left[:63] == 0.0)
+    assert np.all(feat_left[140:280] == 0.0)  # Right hand slot legitimately zero
+    assert validate_features(feat_left) is True
+
+    # Right-hand only present (standard single-hand signing)
+    feat_right, count_r = extract_features_from_arrays(None, mock_pts)
+    assert feat_right.shape == (282,)
+    assert count_r == 1
+    assert feat_right[-2] == 0.0
+    assert feat_right[-1] == 1.0
+    assert np.all(feat_right[:140] == 0.0)  # Left hand slot legitimately zero
+    assert not np.all(feat_right[140:203] == 0.0)
+    assert validate_features(feat_right) is True
+
+    # Neither hand present
+    feat_none, count_n = extract_features_from_arrays(None, None)
+    assert feat_none.shape == (282,)
+    assert count_n == 0
+    assert feat_none[-2] == 0.0
+    assert feat_none[-1] == 0.0
+    assert np.all(feat_none == 0.0)
+    assert validate_features(feat_none) is True
 
 
 # ── Area 4: Training/inference feature compatibility ────────────────────────

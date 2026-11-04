@@ -85,6 +85,8 @@ class ISLNumberRecognizer:
         9: "NINE",
     }
 
+    EXPECTED_CLASSES: List[str] = [str(i) for i in range(10)]
+
     def __init__(
         self,
         model_path: Optional[Path] = None,
@@ -100,9 +102,10 @@ class ISLNumberRecognizer:
         self.sequence_length = sequence_length
 
         self.finger_counter = FingerCounter()
-        self.classes: List[str] = [str(i) for i in range(10)]
+        self.classes: List[str] = list(self.EXPECTED_CLASSES)
         self.id_to_label: Dict[int, str] = {i: str(i) for i in range(10)}
         self.label_to_id: Dict[str, int] = {str(i): i for i in range(10)}
+        self.is_valid_mapping: bool = True
         self._load_labels()
 
         self.trained_model = None
@@ -113,22 +116,41 @@ class ISLNumberRecognizer:
         self._last_conf: float = 0.0
 
     def _load_labels(self):
-        """Load number class mappings."""
+        """Load number class mappings and strictly validate 10-class coverage."""
         for p in [self.labels_path, DEFAULT_LABELS_PATH, CAT_LABELS_PATH]:
             if p and Path(p).exists():
                 try:
                     with open(p, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                    self.classes = data.get("classes") or data.get("labels") or self.classes
+                    loaded_classes = data.get("classes") or data.get("labels")
+                    if loaded_classes is not None:
+                        loaded_str = [str(c) for c in loaded_classes]
+                        if len(loaded_str) != 10 or set(loaded_str) != set(self.EXPECTED_CLASSES):
+                            logger.error(
+                                "ISLNumberRecognizer: Incompatible number classes %s in %s; expected exactly 10 digits 0–9",
+                                loaded_str, p
+                            )
+                            self.is_valid_mapping = False
+                            return
+                        self.classes = loaded_str
+
                     if "id_to_label" in data:
-                        self.id_to_label = {int(k): str(v) for k, v in data["id_to_label"].items()}
+                        loaded_id_to_label = {int(k): str(v) for k, v in data["id_to_label"].items()}
+                        if len(loaded_id_to_label) != 10 or set(loaded_id_to_label.values()) != set(self.EXPECTED_CLASSES):
+                            logger.error("ISLNumberRecognizer: Incompatible id_to_label in %s", p)
+                            self.is_valid_mapping = False
+                            return
+                        self.id_to_label = loaded_id_to_label
                     else:
                         self.id_to_label = {i: str(c) for i, c in enumerate(self.classes)}
-                    self.label_to_id = {str(k): int(v) for k, v in data.get("class_to_id", {c: i for i, c in enumerate(self.classes)}).items()}
-                    logger.info("ISLNumberRecognizer: Loaded %d number classes from %s", len(self.classes), p)
+
+                    self.label_to_id = {v: k for k, v in self.id_to_label.items()}
+                    self.is_valid_mapping = True
+                    logger.info("ISLNumberRecognizer: Loaded 10 verified number classes from %s", p)
                     return
                 except Exception as e:
                     logger.warning("ISLNumberRecognizer: Failed loading labels from %s: %s", p, e)
+                    self.is_valid_mapping = False
 
     def _load_model(self):
         """Load trained Keras number model and verify schema compatibility."""
@@ -177,12 +199,12 @@ class ISLNumberRecognizer:
 
     def predict(self) -> Dict[str, Any]:
         """Classify ISL Number from current sequence buffer."""
-        if not self.is_loaded:
+        if not self.is_loaded or not self.is_valid_mapping:
             return {
                 "number": None,
-                "label": "Model Not Available",
+                "label": "Model Not Available" if not self.is_loaded else "Invalid Mapping",
                 "confidence": 0.0,
-                "status": "Model Not Available",
+                "status": "Model Not Available" if not self.is_loaded else "Inconsistent Class Mapping",
                 "is_model_available": False,
             }
 
@@ -224,12 +246,23 @@ class ISLNumberRecognizer:
                     "is_model_available": True,
                 }
 
-            self._last_number = top_idx
+            num_str = self.id_to_label.get(top_idx)
+            if num_str is None or num_str not in self.label_to_id:
+                logger.error("Top index %d not found in valid id_to_label mapping", top_idx)
+                return {
+                    "number": None,
+                    "label": "Invalid Mapping",
+                    "confidence": 0.0,
+                    "status": "Inconsistent Class Mapping",
+                    "is_model_available": True,
+                }
+
+            num_int = int(num_str) if num_str.isdigit() else top_idx
+            num_name = self.ISL_NUMBER_NAMES.get(num_int, num_str)
+            self._last_number = num_int
             self._last_conf = top_conf
-            num_str = str(top_idx)
-            num_name = self.ISL_NUMBER_NAMES.get(top_idx, num_str)
             return {
-                "number": top_idx,
+                "number": num_int,
                 "label": num_str,
                 "confidence": top_conf,
                 "status": f"Number {num_str} ({num_name})",

@@ -186,13 +186,13 @@ Run dedicated training scripts directly from PowerShell:
 # Train Alphabet Model (A–Z, 26 classes) - Strictly evaluated on held-out signer_02
 python scripts/train_alphabet.py --epochs 25 --batch-size 16
 
-# Train Numbers Model (0–9, 10 classes) - Evaluated on ISLRTC canonical master sequences
+# Train Numbers Model (0–9, 10 classes) - Data leakage prevented, honest evaluation reporting
 python scripts/train_numbers.py --epochs 30 --batch-size 16
 ```
 
 Training specifications:
 - `train_alphabet.py`: Enforces genuine 3-way signer-independent partitioning (Train on `signer_00`, Val on `signer_01`, Test on held-out `signer_02`).
-- `train_numbers.py`: Uses genuine master signer sequences from official ISLRTC Data.gov data (`islrtc_master`). Transparently documents single-signer status (`is_signer_independent: false`); multi-signer benchmarks require recording $\ge 3$ distinct signers via `isl_data_collection`.
+- `train_numbers.py`: Uses genuine master signer sequences from official ISLRTC Data.gov data (`islrtc_master`). For the 10 original samples (1 per class), augmentation is restricted to training and test evaluation is reported as `test_accuracy: null` (`evaluation_status: "not_evaluated_insufficient_independent_samples"`) to prevent data leakage. Multi-signer benchmarks require recording $\ge 3$ distinct signers via `isl_data_collection`.
 - Both scripts save full evaluation reports and class mappings to `models/*/evaluation.json`.
 
 ---

@@ -16,7 +16,7 @@ SignBridge AI focuses exclusively on **character-by-character real-time Indian S
 | Task Modality | Evaluated Model | Evaluation Split Type | Signers | Classes | Baseline Chance | Test Accuracy | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **ISL Alphabet** | `models/isl_fingerspelling_model.keras` | Genuine Signer-Independent | 3 (`signer_00`, `01`, `02`) | 26 | 3.85% | **58.46%** | Active (Held-out `signer_02`) |
-| **ISL Numbers** | `models/isl_number_model.keras` | Single-Signer Stratified | 1 (`islrtc_master`) | 10 | 10.0% | **100.00%** | Active (ISLRTC Official) |
+| **ISL Numbers** | `models/isl_number_model.keras` | Augmented Training Demo (1 per class) | 1 (`islrtc_master`) | 10 | 10.0% | **NOT EVALUATED** (Data Leakage Prevented) | Active (`test_accuracy: null`) |
 | *ISL Words* | *`models/isl_word_model.keras`* | *Archived Historical Reference* | *13* | *40* | *2.50%* | *33.33%* | Decoupled (Inactive) |
 
 ---
@@ -41,10 +41,12 @@ SignBridge AI focuses exclusively on **character-by-character real-time Indian S
 ## 2. Number Recognition Model (`models/isl_number_model.keras`)
 
 ### 2.1 Scientific Integrity Note
-Earlier revisions synthesized artificial signers (`signer_sim_00`..`15`) by adding random jitter to a single video and claimed 100% "signer-independent" accuracy. This practice has been **completely eliminated**:
-- The official ISLRTC Data.gov dataset (`silentone0725/Indian_Sign_Language_Data.gov_Rencoded`) provides **exactly one master human signer** (`islrtc_master`) for digits 0 through 9.
-- We report this fact transparently: the number model achieves high accuracy on the canonical ISLRTC master signer sequences with post-split spatial regularization.
-- To establish a scientifically verified multi-signer benchmark for numbers, users can record $\ge 3$ distinct signers via the built-in `isl_data_collection` tool.
+Earlier revisions synthesized artificial signers (`signer_sim_00`..`15`) by adding random jitter to a single video and claimed 100% "signer-independent" accuracy. Subsequently, evaluating augmented training samples on the original single-signer seed also created train/test leakage. Both practices have been **completely eliminated**:
+- The official ISLRTC Data.gov dataset (`silentone0725/Indian_Sign_Language_Data.gov_Rencoded`) provides **exactly one master human signer** (`islrtc_master`) for digits 0 through 9 (10 raw video samples total).
+- Because there is only 1 raw sample per class, any split evaluating on those same 10 samples suffers from train/test leakage.
+- We report this fact transparently: `test_accuracy` is set to `null` and `evaluation_status` is `"not_evaluated_insufficient_independent_samples"` in `models/number/evaluation.json`.
+- The model is trained with data augmentation for functional real-time demo inference.
+- To establish a scientifically verified multi-signer benchmark for numbers, users can record $\ge 3$ distinct signers (or $\ge 3$ samples per class) via the built-in `isl_data_collection` tool.
 
 ### 2.2 Model Architecture & Verification
 - **Input Shape:** `(None, 30, 282)`

@@ -2,10 +2,13 @@
 SignBridge AI — Dedicated Numbers Model Training Script (0–9).
 Trains a Bidirectional LSTM classifier for Indian Sign Language Numbers (10 classes: 0 to 9).
 Strictly uses backend/vision/feature_schema.py (v2.0.0, 282 dimensions, 30 frames).
-Transparent, honest splitting:
+Transparent, honest splitting and zero data leakage:
 - If >= 3 genuine signers exist: enforces 3-way signer-independent split.
-- If only 1 signer exists (official ISLRTC source): uses stratified split with clear metadata
-  flagging `is_signer_independent: false`, preventing any false scientific claims.
+- If multiple independent samples exist per class: splits genuine samples before augmenting training partition.
+- If only 1 sample per class exists (e.g. 10 total samples from ISLRTC master signer):
+  trains demo/experimental model with augmentation strictly on train data, refuses to evaluate
+  on training samples, sets test_accuracy to null, and marks status as
+  not_evaluated_insufficient_independent_samples to eliminate false 100% claims.
 """
 
 import argparse
@@ -13,7 +16,7 @@ import json
 import logging
 from pathlib import Path
 import sys
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Optional
 
 import numpy as np
 
@@ -134,7 +137,7 @@ def _augment_training_samples(X: np.ndarray, y: np.ndarray, factor: int = 8) -> 
 def train_number_model(epochs: int = 30, batch_size: int = 16) -> Dict[str, Any]:
     """
     Programmatic entry point for training the ISL Number (0–9) model.
-    Enforces honest evaluation and schema compatibility.
+    Enforces honest evaluation, class coverage verification, and zero data leakage.
     """
     from sklearn.model_selection import train_test_split
 
@@ -144,14 +147,29 @@ def train_number_model(epochs: int = 30, batch_size: int = 16) -> Dict[str, Any]
         logger.info("Run `python scripts/import_number_datasets.py` to download and extract dataset.")
         return {"status": "error", "message": "No valid number samples found"}
 
+    # Enforce complete class coverage: all 10 digits 0 to 9 must be present in dataset
+    present_classes = sorted(set(y.tolist()))
+    missing_classes = [ID_TO_LABEL[i] for i in range(len(NUMBER_CLASSES)) if i not in present_classes]
+    logger.info("Present number classes (%d/10): %s", len(present_classes), [ID_TO_LABEL[i] for i in present_classes])
+    if missing_classes:
+        err_msg = (
+            f"Incomplete number class coverage: missing required digits {missing_classes}. "
+            f"All 10 digits (0-9) must be recorded before training. "
+            f"Use the 'ISL Data Collection' UI to record the missing classes."
+        )
+        logger.error(err_msg)
+        raise ValueError(err_msg)
+
     unique_signers = sorted(list(set(signers)))
     is_signer_independent = len(unique_signers) >= 3
 
-    present_classes = sorted(set(y.tolist()))
-    missing = [c for i, c in enumerate(NUMBER_CLASSES) if i not in present_classes]
-    logger.info("Present number classes (%d/10): %s", len(present_classes), [ID_TO_LABEL[i] for i in present_classes])
-    if missing:
-        logger.warning("Missing number classes (%d): %s", len(missing), missing)
+    # Check for sufficient independent samples per class to permit an honest test split
+    class_counts = {ID_TO_LABEL[c]: int(np.sum(y == c)) for c in present_classes}
+    min_samples_per_class = min(class_counts.values())
+
+    test_loss: Optional[float] = None
+    test_acc: Optional[float] = None
+    evaluation_status = "evaluated"
 
     if is_signer_independent:
         signers_arr = np.asarray(signers)
@@ -167,51 +185,72 @@ def train_number_model(epochs: int = 30, batch_size: int = 16) -> Dict[str, Any]
         X_val, y_val = X[val_mask], y[val_mask]
         X_test, y_test = X[test_mask], y[test_mask]
         split_type = "signer_independent"
-    else:
-        # Honest reporting: ISLRTC only provides 1 signer (islrtc_master)
+
+        # Apply augmentation strictly to training partition
+        X_train_aug, y_train_aug = _augment_training_samples(X_train, y_train, factor=4)
+        validation_data = (X_val, y_val)
+
+    elif min_samples_per_class >= 3:
+        # Single or dual signer, but with multiple independent recordings per class
         logger.info(
-            "Found %d unique signer(s) (%s). Signer-independent split requires >= 3 signers. "
-            "Using stratified split with honest reporting.",
-            len(unique_signers), unique_signers
+            "Found %d unique signer(s) with >= 3 samples per class. "
+            "Performing sample-level stratified split (NOT signer-independent).",
+            len(unique_signers)
         )
         split_type = "single_signer_stratified"
-        train_signers = unique_signers
-        val_signer = unique_signers[0]
-        test_signer = unique_signers[0]
+        train_idx, test_idx = train_test_split(
+            np.arange(len(X)), test_size=0.20, random_state=42, stratify=y
+        )
+        train_idx, val_idx = train_test_split(
+            train_idx, test_size=0.25, random_state=42, stratify=y[train_idx]
+        )
+        X_train, y_train = X[train_idx], y[train_idx]
+        X_val, y_val = X[val_idx], y[val_idx]
+        X_test, y_test = X[test_idx], y[test_idx]
 
-        # In a 10-sample single-signer dataset, train on base samples with post-split augmentation
-        if len(X) <= 10:
-            X_train, y_train = _augment_training_samples(X, y, factor=12)
-            X_val, y_val = X, y
-            X_test, y_test = X, y
-        else:
-            train_idx, test_idx = train_test_split(
-                np.arange(len(X)), test_size=0.20, random_state=42, stratify=y
-            )
-            train_idx, val_idx = train_test_split(
-                train_idx, test_size=0.25, random_state=42, stratify=y[train_idx]
-            )
-            X_train, y_train = X[train_idx], y[train_idx]
-            X_val, y_val = X[val_idx], y[val_idx]
-            X_test, y_test = X[test_idx], y[test_idx]
+        # Augmentation strictly on training set
+        X_train_aug, y_train_aug = _augment_training_samples(X_train, y_train, factor=6)
+        validation_data = (X_val, y_val)
 
-    logger.info("Number Splits: Train=%d, Val=%d, Test=%d (Split type: %s)",
-                len(X_train), len(X_val), len(X_test), split_type)
+    else:
+        # Special condition: Only 1 sample per class (e.g. 10 total samples from ISLRTC master signer)
+        # Refuse to evaluate on training samples to eliminate data leakage
+        logger.warning(
+            "Only %d original number samples available (%d per class). "
+            "Too few independent samples for a scientifically valid test split. "
+            "Model will be trained with data augmentation for demo purposes, "
+            "but test accuracy will be set to null to prevent data leakage.",
+            len(X), min_samples_per_class
+        )
+        split_type = "augmented_training_only_insufficient_samples"
+        evaluation_status = "not_evaluated_insufficient_independent_samples"
+        X_train_aug, y_train_aug = _augment_training_samples(X, y, factor=12)
+        validation_data = None
+        X_test = None
+        y_test = None
 
     model = build_number_model(num_classes=len(NUMBER_CLASSES))
     verify_model_compatibility(model, expected_dim=FEATURE_DIM, expected_seq_len=SEQUENCE_LENGTH)
 
     logger.info("Beginning number training for %d epochs...", epochs)
     history = model.fit(
-        X_train, y_train,
-        validation_data=(X_val, y_val),
+        X_train_aug, y_train_aug,
+        validation_data=validation_data,
         epochs=epochs,
         batch_size=batch_size,
         verbose=1,
     )
 
-    test_loss, test_acc = model.evaluate(X_test, y_test, verbose=0)
-    logger.info("Number Evaluation Test Accuracy: %.2f%% (Loss: %.4f)", test_acc * 100.0, test_loss)
+    # Perform evaluation strictly if an independent test set was established
+    if X_test is not None and len(X_test) > 0:
+        test_loss_val, test_acc_val = model.evaluate(X_test, y_test, verbose=0)
+        test_loss = float(test_loss_val)
+        test_acc = float(test_acc_val)
+        logger.info("Number Evaluation Test Accuracy: %.2f%% (Loss: %.4f)", test_acc * 100.0, test_loss)
+    else:
+        test_loss = None
+        test_acc = None
+        logger.info("Number Evaluation Test Accuracy: NOT EVALUATED (Insufficient independent samples)")
 
     # Save models
     for out_p in [OUT_MODEL_PATH, CAT_MODEL_PATH]:
@@ -239,28 +278,31 @@ def train_number_model(epochs: int = 30, batch_size: int = 16) -> Dict[str, Any]
             json.dump(labels_metadata, f, indent=2)
         logger.info("Saved number labels to %s", lbl_p)
 
-    # Save evaluation report with scientific truth
+    # Save evaluation report with scientific truth and no data leakage
     eval_data = {
+        "evaluation_status": evaluation_status,
         "is_signer_independent": is_signer_independent,
         "signer_count": len(unique_signers),
         "signers": unique_signers,
         "split_type": split_type,
         "note": (
-            "ISLRTC official Data.gov dataset provides 1 human master signer for digits 0-9. "
-            "To perform a genuine signer-independent benchmark, record >= 3 distinct signers "
-            "using the isl_data_collection module."
-            if not is_signer_independent else "Evaluated on held-out human signer."
+            "ISLRTC official Data.gov dataset provides 1 human master signer for digits 0-9 (10 samples total). "
+            "To prevent train/test data leakage, no evaluation was performed on training samples. "
+            "A reliable generalisation benchmark requires collecting at least 30 independent original recordings "
+            "(minimum 3 per class) or >= 3 distinct human signers using the isl_data_collection tool."
+            if evaluation_status == "not_evaluated_insufficient_independent_samples"
+            else ("Evaluated on held-out human signer." if is_signer_independent else "Evaluated on independent sample partition (same signer).")
         ),
         "sample_counts": {
             "total_raw": int(len(X)),
-            "train": int(len(X_train)),
-            "val": int(len(X_val)),
-            "test": int(len(X_test)),
+            "train_augmented": int(len(X_train_aug)),
+            "val": int(len(X_val)) if validation_data is not None else 0,
+            "test": int(len(X_test)) if X_test is not None else 0,
         },
-        "test_accuracy": float(test_acc),
-        "test_loss": float(test_loss),
+        "test_accuracy": test_acc,
+        "test_loss": test_loss,
         "present_classes": [ID_TO_LABEL[i] for i in present_classes],
-        "missing_classes": missing,
+        "missing_classes": missing_classes,
         "epochs_completed": len(history.history.get("loss", [])),
     }
     EVAL_REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
