@@ -120,7 +120,7 @@ def build_diagnostics_tab():
                     sources=["webcam"],
                     streaming=True,
                     type="numpy",
-                    mirror_webcam=True,
+                    mirror_webcam=False,
                 )
                 diag_camera_annotated = gr.Image(
                     label="Live Diagnostic Landmark Skeleton",

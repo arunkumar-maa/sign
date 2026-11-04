@@ -403,6 +403,12 @@ class LivePipeline:
                         pred_sign = "Unknown Sign"
                         conf_str = f"{rec_conf:.1%}" if rec_conf > 0.1 else "—"
                         hud_status = status_text
+
+                    if "top_5" in alph_pred:
+                        t5_list = [f"{item['letter']}:{item['probability']:.1%}" for item in alph_pred["top_5"][:3]]
+                        tracking_status += f"\n• Top Predictions: {', '.join(t5_list)}"
+                        if "margin" in alph_pred:
+                            tracking_status += f" (Margin: {alph_pred['margin']:.1%})"
                 t_inference_end = time.perf_counter()
 
         # ── Step 5: Character Builder Auto-Add Stabilization ──

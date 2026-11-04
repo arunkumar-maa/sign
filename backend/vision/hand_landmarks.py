@@ -175,6 +175,7 @@ class HandLandmarker:
                     result.detected = num_hands > 0
                     result.num_hands = num_hands
 
+                    detected_hands = []
                     for i in range(num_hands):
                         lms = detection_res.hand_landmarks[i]
                         coords = np.array([[lm.x, lm.y, lm.z] for lm in lms], dtype=np.float32)
@@ -185,15 +186,28 @@ class HandLandmarker:
                             top_category = detection_res.handedness[i][0]
                             label = top_category.category_name or top_category.display_name or label
                             score = float(top_category.score)
+                        detected_hands.append((label, coords, score))
 
-                        if label.lower() == "left":
-                            result.left_hand_detected = True
-                            result.left_landmarks = coords
-                            result.left_confidence = score
+                    # Prevent duplicate handedness collision dropping one hand
+                    slots = {"left": None, "right": None}
+                    for label, coords, score in detected_hands:
+                        side = label.lower()
+                        if side not in slots or slots[side] is not None:
+                            empty_side = "left" if slots["left"] is None else "right"
+                            slots[empty_side] = (coords, score, label)
                         else:
-                            result.right_hand_detected = True
-                            result.right_landmarks = coords
-                            result.right_confidence = score
+                            slots[side] = (coords, score, label)
+
+                    if slots["left"] is not None:
+                        result.left_hand_detected = True
+                        result.left_landmarks = slots["left"][0]
+                        result.left_confidence = slots["left"][1]
+                    if slots["right"] is not None:
+                        result.right_hand_detected = True
+                        result.right_landmarks = slots["right"][0]
+                        result.right_confidence = slots["right"][1]
+
+                    for label, coords, score in detected_hands:
                         result.all_hands.append((label, coords, score))
             except Exception as exc:
                 logger.error("Tasks HandLandmarker error: %s", exc)
@@ -208,19 +222,32 @@ class HandLandmarker:
                     result.detected = num_hands > 0
                     result.num_hands = num_hands
 
+                    detected_hands = []
                     for landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
                         label = handedness.classification[0].label
                         score = float(handedness.classification[0].score)
                         coords = np.array([[lm.x, lm.y, lm.z] for lm in landmarks.landmark], dtype=np.float32)
+                        detected_hands.append((label, coords, score))
 
-                        if label.lower() == "left":
-                            result.left_hand_detected = True
-                            result.left_landmarks = coords
-                            result.left_confidence = score
+                    slots = {"left": None, "right": None}
+                    for label, coords, score in detected_hands:
+                        side = label.lower()
+                        if side not in slots or slots[side] is not None:
+                            empty_side = "left" if slots["left"] is None else "right"
+                            slots[empty_side] = (coords, score, label)
                         else:
-                            result.right_hand_detected = True
-                            result.right_landmarks = coords
-                            result.right_confidence = score
+                            slots[side] = (coords, score, label)
+
+                    if slots["left"] is not None:
+                        result.left_hand_detected = True
+                        result.left_landmarks = slots["left"][0]
+                        result.left_confidence = slots["left"][1]
+                    if slots["right"] is not None:
+                        result.right_hand_detected = True
+                        result.right_landmarks = slots["right"][0]
+                        result.right_confidence = slots["right"][1]
+
+                    for label, coords, score in detected_hands:
                         result.all_hands.append((label, coords, score))
             except Exception as exc:
                 logger.error("Legacy HandLandmarker error: %s", exc)

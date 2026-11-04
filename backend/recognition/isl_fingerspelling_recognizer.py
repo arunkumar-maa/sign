@@ -68,7 +68,7 @@ class ISLFingerspellingRecognizer:
         self._last_conf: float = 0.0
 
     def _load_labels(self):
-        """Load alphabet class mappings and strictly validate 26-class A–Z coverage."""
+        """Load alphabet class mappings and strictly validate 26-class A–Z ordered coverage."""
         for p in [self.labels_path, DEFAULT_LABELS_PATH, CAT_LABELS_PATH]:
             if p and Path(p).exists():
                 try:
@@ -77,10 +77,10 @@ class ISLFingerspellingRecognizer:
                     loaded_classes = data.get("classes") or data.get("labels")
                     if loaded_classes is not None:
                         loaded_str = [str(c).upper() for c in loaded_classes]
-                        if len(loaded_str) != 26 or set(loaded_str) != set(self.EXPECTED_CLASSES):
+                        if loaded_str != self.EXPECTED_CLASSES:
                             logger.error(
-                                "ISLFingerspellingRecognizer: Incompatible classes %s in %s; expected 26 classes A–Z",
-                                loaded_str, p
+                                "ISLFingerspellingRecognizer: Incompatible class order %s in %s; expected exact A–Z order %s",
+                                loaded_str, p, self.EXPECTED_CLASSES
                             )
                             self.is_valid_mapping = False
                             return
@@ -88,17 +88,38 @@ class ISLFingerspellingRecognizer:
 
                     if "id_to_label" in data:
                         loaded_id_to_label = {int(k): str(v).upper() for k, v in data["id_to_label"].items()}
-                        if len(loaded_id_to_label) != 26 or set(loaded_id_to_label.values()) != set(self.EXPECTED_CLASSES):
-                            logger.error("ISLFingerspellingRecognizer: Incompatible id_to_label in %s", p)
+                        if len(loaded_id_to_label) != 26:
+                            logger.error("ISLFingerspellingRecognizer: id_to_label in %s does not contain 26 classes", p)
                             self.is_valid_mapping = False
                             return
+                        for expected_idx, expected_char in enumerate(self.EXPECTED_CLASSES):
+                            if loaded_id_to_label.get(expected_idx) != expected_char:
+                                logger.error(
+                                    "ISLFingerspellingRecognizer: id_to_label mapping mismatch in %s at index %d: expected %s, got %s",
+                                    p, expected_idx, expected_char, loaded_id_to_label.get(expected_idx)
+                                )
+                                self.is_valid_mapping = False
+                                return
                         self.id_to_label = loaded_id_to_label
                     else:
                         self.id_to_label = {i: c for i, c in enumerate(self.classes)}
 
-                    self.label_to_id = {v: k for k, v in self.id_to_label.items()}
+                    if "label_to_id" in data:
+                        loaded_label_to_id = {str(k).upper(): int(v) for k, v in data["label_to_id"].items()}
+                        for expected_idx, expected_char in enumerate(self.EXPECTED_CLASSES):
+                            if loaded_label_to_id.get(expected_char) != expected_idx:
+                                logger.error(
+                                    "ISLFingerspellingRecognizer: label_to_id mapping mismatch in %s for %s: expected %d, got %s",
+                                    p, expected_char, expected_idx, loaded_label_to_id.get(expected_char)
+                                )
+                                self.is_valid_mapping = False
+                                return
+                        self.label_to_id = loaded_label_to_id
+                    else:
+                        self.label_to_id = {v: k for k, v in self.id_to_label.items()}
+
                     self.is_valid_mapping = True
-                    logger.info("ISLFingerspellingRecognizer: Loaded 26 verified classes from %s", p)
+                    logger.info("ISLFingerspellingRecognizer: Loaded 26 strictly verified classes (A=0..Z=25) from %s", p)
                     return
                 except Exception as e:
                     logger.warning("ISLFingerspellingRecognizer: Failed loading labels from %s: %s", p, e)
@@ -194,6 +215,30 @@ class ISLFingerspellingRecognizer:
             second_conf = float(probs[sorted_indices[1]]) if len(sorted_indices) > 1 else 0.0
             margin = top_conf - second_conf
 
+            top_5 = [
+                {
+                    "index": int(i),
+                    "letter": self.id_to_label.get(int(i), "?"),
+                    "probability": float(probs[int(i)]),
+                }
+                for i in sorted_indices[:5]
+            ]
+            pred_letter = self.id_to_label.get(top_idx)
+
+            logger.info(
+                "ISLFingerspellingRecognizer predict: winning_index=%d, resolved_letter=%s, "
+                "confidence=%.4f (min_conf=%.4f), runner_up_conf=%.4f, margin=%.4f (min_margin=%.4f), "
+                "top_5=%s",
+                top_idx,
+                pred_letter,
+                top_conf,
+                self.min_confidence,
+                second_conf,
+                margin,
+                self.margin_threshold,
+                [(item["letter"], f"{item['probability']:.3f}") for item in top_5],
+            )
+
             # Gating: must exceed minimum confidence AND separate from runner-up by margin
             if top_conf < self.min_confidence or margin < self.margin_threshold:
                 return {
@@ -202,9 +247,14 @@ class ISLFingerspellingRecognizer:
                     "confidence": top_conf,
                     "status": "Unknown Sign",
                     "is_model_available": True,
+                    "top_5": top_5,
+                    "winning_index": top_idx,
+                    "resolved_letter": pred_letter,
+                    "margin": margin,
+                    "confidence_threshold": self.min_confidence,
+                    "margin_threshold": self.margin_threshold,
                 }
 
-            pred_letter = self.id_to_label.get(top_idx)
             if pred_letter is None or pred_letter not in self.label_to_id:
                 logger.error("Top index %d not found in valid id_to_label mapping", top_idx)
                 return {
@@ -213,6 +263,12 @@ class ISLFingerspellingRecognizer:
                     "confidence": 0.0,
                     "status": "Inconsistent Class Mapping",
                     "is_model_available": True,
+                    "top_5": top_5,
+                    "winning_index": top_idx,
+                    "resolved_letter": pred_letter,
+                    "margin": margin,
+                    "confidence_threshold": self.min_confidence,
+                    "margin_threshold": self.margin_threshold,
                 }
             self._last_letter = pred_letter
             self._last_conf = top_conf
@@ -223,6 +279,12 @@ class ISLFingerspellingRecognizer:
                 "confidence": top_conf,
                 "status": f"Letter {pred_letter} ({top_conf:.1%})",
                 "is_model_available": True,
+                "top_5": top_5,
+                "winning_index": top_idx,
+                "resolved_letter": pred_letter,
+                "margin": margin,
+                "confidence_threshold": self.min_confidence,
+                "margin_threshold": self.margin_threshold,
             }
         except Exception as e:
             logger.error("ISLFingerspellingRecognizer: Inference error: %s", e)
