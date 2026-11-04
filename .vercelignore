@@ -1,0 +1,38 @@
+# Data and datasets (large files)
+data/
+data/raw/
+data/processed/
+data/splits/
+data/reports/
+data/isl_signs/
+*.db
+*.sqlite
+
+# Large ML model binaries
+models/mediapipe/
+models/static/*.keras
+models/static/*.h5
+models/dynamic/*.keras
+models/dynamic/*.h5
+*.task
+*.npz
+
+# Non-backend directories
+tests/
+notebooks/
+references/
+docs/
+isl_data_collection/
+scripts/
+frontend/
+
+# Cache and environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.git/
+.github/
+*.log
