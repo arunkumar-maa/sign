@@ -20,7 +20,7 @@ import uvicorn
 import gradio as gr
 
 import config as cfg
-from backend.main import app as fastapi_app, _init_services
+from backend.main import app as fastapi_app
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,9 +28,6 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 logger = logging.getLogger("signbridge")
-
-# Initialise backend services immediately (not waiting for uvicorn startup event)
-_init_services()
 
 
 def build_gradio_app() -> gr.Blocks:

@@ -27,6 +27,7 @@ class ActiveRecording:
     started_at: float
     writer: Optional[cv2.VideoWriter] = None
     frame_count: int = 0
+    hands_detected_count: int = 0
     width: int = 0
     height: int = 0
     auto_stopped: bool = False
@@ -65,7 +66,7 @@ class RecordingManager:
         with self._lock:
             return session_id in self._active
 
-    def append_frame(self, session_id: str, rgb_frame: np.ndarray) -> str:
+    def append_frame(self, session_id: str, rgb_frame: np.ndarray, has_hands: bool = True) -> str:
         if not isinstance(rgb_frame, np.ndarray) or rgb_frame.ndim != 3 or rgb_frame.shape[2] < 3:
             return "Camera frame is invalid."
         with self._lock:
@@ -91,6 +92,8 @@ class RecordingManager:
                 frame = cv2.resize(frame, (recording.width, recording.height))
             recording.writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
             recording.frame_count += 1
+            if has_hands:
+                recording.hands_detected_count += 1
 
             elapsed = time.monotonic() - recording.started_at
             if elapsed >= MAX_RECORDING_SECONDS:
@@ -98,7 +101,7 @@ class RecordingManager:
                 self._finish_locked(session_id)
                 return f"Maximum {MAX_RECORDING_SECONDS:.0f}-second clip saved. Start another sample for this label."
 
-            return f"Recording {recording.label}: {recording.frame_count} frames, {elapsed:.1f}/{MAX_RECORDING_SECONDS:.0f} seconds."
+            return f"Recording {recording.label}: {recording.frame_count} frames ({recording.hands_detected_count} hand frames), {elapsed:.1f}/{MAX_RECORDING_SECONDS:.0f}s."
 
     def stop(self, session_id: str) -> str:
         with self._lock:
@@ -115,6 +118,12 @@ class RecordingManager:
             return (
                 f"Sample discarded: only {recording.frame_count} frames were captured. "
                 f"Record at least {MIN_RECORDING_FRAMES} frames."
+            )
+        if recording.hands_detected_count < 3:
+            recording.path.unlink(missing_ok=True)
+            return (
+                f"Sample discarded: no valid hand landmarks detected ({recording.hands_detected_count} hand frames). "
+                f"Please ensure hand is clearly visible to camera."
             )
         if not recording.path.exists() or recording.path.stat().st_size == 0:
             return "Recording file was not created. Check OpenCV video codec support."

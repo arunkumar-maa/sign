@@ -24,6 +24,12 @@ import cv2
 import numpy as np
 
 from backend.vision.hand_landmarks import HandLandmarker, HandLandmarkResult
+from backend.vision.feature_schema import (
+    extract_frame_features,
+    FEATURE_DIM,
+    SEQUENCE_LENGTH,
+    validate_features,
+)
 from backend.vision.hand_pose_features import (
     extract_two_hand_features,
     classify_handshape_name,
@@ -34,6 +40,7 @@ from backend.recognition.isl_number_recognizer import ISLNumberRecognizer, ISLNu
 from backend.recognition.isl_fingerspelling_recognizer import ISLFingerspellingRecognizer
 from backend.recognition.isl_word_recognizer import ISLWordRecognizer
 from backend.recognition.sentence_builder import SentenceBuilder
+from backend.recognition.character_builder import CharacterTextBuilder
 from backend.vision.performance_monitor import PerformanceMonitor, LatencyProfile
 
 logger = logging.getLogger(__name__)
@@ -77,6 +84,11 @@ class LivePipeline:
             repeat_cooldown_seconds=repeat_cooldown,
             required_stable_frames=15,
             min_auto_confidence=0.85,
+        )
+        self.character_builder = CharacterTextBuilder(
+            required_stable_frames=6,
+            min_auto_confidence=0.65,
+            repeat_cooldown_seconds=repeat_cooldown,
         )
         self.perf_monitor = PerformanceMonitor()
 
@@ -125,9 +137,15 @@ class LivePipeline:
 
     def accept_current_sign(self) -> Tuple[str, str]:
         """User clicked 'Accept Current Sign'."""
-        if self._last_pred_sign and self._last_pred_sign not in ("—", "Unknown Sign", "Collecting sign frames..."):
+        if self._last_pred_sign and self._last_pred_sign not in ("—", "Unknown Sign", "Collecting sign frames...", "Model Not Available"):
+            clean = self._last_pred_sign
+            for prefix in ("Letter ", "Number ", "ISL Number: ", "Count: "):
+                if clean.startswith(prefix):
+                    clean = clean[len(prefix):].split()[0]
+            self.character_builder.add_character(clean)
             self.sentence_builder.accept_current_sign(self._last_pred_sign, 1.0)
-        return self.sentence_builder.current_sentence, " → ".join(self.sentence_builder.gloss_sequence)
+        curr = self.character_builder.text or self.sentence_builder.current_sentence
+        return curr, " → ".join(self.sentence_builder.gloss_sequence)
 
     def undo_last_sign(self) -> Tuple[str, str]:
         """Remove the most recently confirmed sign from the sentence."""
@@ -146,53 +164,31 @@ class LivePipeline:
             self.sentence_builder.set_user_text(custom_text.strip())
         return self.sentence_builder.confirmed_text
 
+    def add_character(self, char: Optional[str]) -> str:
+        """Append a recognized character to the text buffer."""
+        if char:
+            self.character_builder.add_character(char)
+            self.sentence_builder.add_word(char)
+        return self.character_builder.text or self.sentence_builder.current_sentence
+
+    def backspace(self) -> str:
+        """Remove trailing character from text buffer."""
+        self.character_builder.backspace()
+        self.sentence_builder.undo()
+        return self.character_builder.text
+
+    def clear_text(self) -> str:
+        """Clear the character and sentence text buffers."""
+        self.character_builder.clear()
+        self.sentence_builder.clear()
+        return ""
+
     def _extract_282_features(self, hand_result: HandLandmarkResult) -> np.ndarray:
         """
-        Extract standardized 282-dim hand landmark feature vector:
-        2 hands * (63 abs + 63 rel + 10 angles + 4 distances = 140) + 2 presence flags.
+        Extract standardized 282-dim hand landmark feature vector via shared Feature Schema (v2.0.0).
         """
-        from isl_data_collection.hand_landmarks import _joint_angle
-
-        def _hand_features(pts: np.ndarray) -> np.ndarray:
-            wrist = pts[0].copy()
-            palm_scale = float(np.linalg.norm(pts[9] - wrist))
-            if palm_scale < 1e-4:
-                palm_scale = 1e-4
-            rel = (pts - wrist) / palm_scale
-            angle_triplets = [
-                (1, 2, 3), (2, 3, 4),
-                (5, 6, 7), (6, 7, 8),
-                (9, 10, 11), (10, 11, 12),
-                (13, 14, 15), (14, 15, 16),
-                (17, 18, 19), (18, 19, 20),
-            ]
-            angles = np.asarray([_joint_angle(pts[a], pts[b], pts[c]) for a, b, c in angle_triplets], dtype=np.float32)
-            tip_indices = (8, 12, 16, 20)
-            thumb_tip = pts[4]
-            tip_distances = np.asarray([np.linalg.norm(pts[i] - thumb_tip) / palm_scale for i in tip_indices], dtype=np.float32)
-            return np.concatenate([pts.reshape(-1), rel.reshape(-1), angles, tip_distances]).astype(np.float32)
-
-        slots = {"Left": np.zeros(140, dtype=np.float32), "Right": np.zeros(140, dtype=np.float32)}
-        presence = [0.0, 0.0]
-
-        if hand_result.left_hand_detected and hand_result.left_landmarks is not None:
-            slots["Left"] = _hand_features(hand_result.left_landmarks[:21, :3])
-            presence[0] = 1.0
-
-        if hand_result.right_hand_detected and hand_result.right_landmarks is not None:
-            slots["Right"] = _hand_features(hand_result.right_landmarks[:21, :3])
-            presence[1] = 1.0
-
-        # If raw_results is present and neither slot populated above, try result_to_features
-        if presence == [0.0, 0.0] and hand_result.raw_results is not None:
-            try:
-                from isl_data_collection.hand_landmarks import result_to_features
-                feat, _ = result_to_features(hand_result.raw_results)
-                return feat
-            except Exception:
-                pass
-
-        return np.concatenate([slots["Left"], slots["Right"], np.asarray(presence, dtype=np.float32)]).astype(np.float32)
+        feat, _ = extract_frame_features(hand_result)
+        return feat
 
     def process_frame(
         self,
@@ -447,11 +443,17 @@ class LivePipeline:
                         hud_status = status_text
                 t_inference_end = time.perf_counter()
 
-        # ── Step 5: Sentence Builder Update ──
+        # ── Step 5: Sentence & Character Builder Update ──
         t_sentence_start = time.perf_counter()
         if auto_add:
             if candidate_for_auto_add:
-                # Support mocked is_new_sign or 15-frame stabilization
+                if "alphabet" in self.mode.lower() or "spelling" in self.mode.lower() or "number" in self.mode.lower():
+                    self.character_builder.auto_add_enabled = True
+                    self.character_builder.process_auto_frame(
+                        character_candidate=candidate_for_auto_add,
+                        confidence=candidate_conf,
+                        hand_detected=True,
+                    )
                 if "word" in self.mode.lower() and locals().get("pred", {}).get("is_new_sign", False):
                     self.sentence_builder.add_word(candidate_for_auto_add, candidate_conf)
                 else:
@@ -486,7 +488,7 @@ class LivePipeline:
         )
 
         latency_summary = profile.summary_string()
-        sentence_text = self.sentence_builder.current_sentence or current_sentence or ""
+        sentence_text = self.character_builder.text or self.sentence_builder.current_sentence or current_sentence or ""
         gloss_seq = " → ".join(self.sentence_builder.gloss_sequence)
 
         return {

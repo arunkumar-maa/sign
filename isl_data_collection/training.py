@@ -5,20 +5,13 @@ import numpy as np
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from sklearn.model_selection import GroupShuffleSplit
 
-from .config import FEATURE_DIM, LANDMARK_MANIFEST, MODEL_DIR, SEQUENCE_LENGTH
+from backend.vision.feature_schema import FEATURE_DIM, SEQUENCE_LENGTH, resample_sequence
+from .config import LANDMARK_MANIFEST, MODEL_DIR
 from .storage import read_jsonl
 
 
 def _resample_sequence(sequence: np.ndarray, target_length: int = SEQUENCE_LENGTH) -> np.ndarray:
-    if sequence.ndim != 2 or sequence.shape[1] != FEATURE_DIM:
-        raise ValueError(f"Expected [frames, {FEATURE_DIM}] feature array; received {sequence.shape}.")
-    if len(sequence) == 0:
-        raise ValueError("Empty feature sequence.")
-    positions = np.linspace(0, len(sequence) - 1, target_length)
-    left = np.floor(positions).astype(int)
-    right = np.ceil(positions).astype(int)
-    weight = (positions - left)[:, None].astype(np.float32)
-    return (sequence[left] * (1.0 - weight) + sequence[right] * weight).astype(np.float32)
+    return resample_sequence(sequence, target_length=target_length)
 
 
 def _load_category(category: str):

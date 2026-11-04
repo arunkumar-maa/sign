@@ -28,77 +28,28 @@ def ensure_hand_task_model() -> Path:
     return HAND_TASK_PATH
 
 
+from backend.vision.feature_schema import (
+    FEATURE_DIM,
+    SINGLE_HAND_DIM,
+    compute_joint_angle,
+    extract_frame_features,
+    extract_single_hand_features,
+)
+
+
 def _joint_angle(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
     """Angle ABC in [0, 1], normalized from degrees to 180 degrees."""
-    first = a - b
-    second = c - b
-    denominator = float(np.linalg.norm(first) * np.linalg.norm(second))
-    if denominator < 1e-8:
-        return 0.0
-    cosine = float(np.clip(np.dot(first, second) / denominator, -1.0, 1.0))
-    return float(np.arccos(cosine) / np.pi)
+    return compute_joint_angle(a, b, c)
 
 
 def _feature_for_hand(hand_landmarks: Any) -> np.ndarray:
     points = np.asarray([[p.x, p.y, p.z] for p in hand_landmarks], dtype=np.float32)
-    if points.shape != (21, 3):
-        raise ValueError(f"Expected 21 x 3 landmarks, received {points.shape}.")
-    wrist = points[0].copy()
-    palm_scale = float(np.linalg.norm(points[9] - wrist))
-    if palm_scale < 1e-4:
-        palm_scale = 1e-4
-    relative = (points - wrist) / palm_scale
-
-    # Two thumb joint angles, then PIP and DIP angles for index/middle/ring/little.
-    angle_triplets = [
-        (1, 2, 3), (2, 3, 4),
-        (5, 6, 7), (6, 7, 8),
-        (9, 10, 11), (10, 11, 12),
-        (13, 14, 15), (14, 15, 16),
-        (17, 18, 19), (18, 19, 20),
-    ]
-    angles = np.asarray([_joint_angle(points[a], points[b], points[c]) for a, b, c in angle_triplets], dtype=np.float32)
-    tip_indices = (8, 12, 16, 20)
-    thumb_tip = points[4]
-    tip_distances = np.asarray(
-        [np.linalg.norm(points[index] - thumb_tip) / palm_scale for index in tip_indices],
-        dtype=np.float32,
-    )
-    # 63 absolute coordinates + 63 wrist-relative coordinates + 10 angles + 4 distances.
-    return np.concatenate([points.reshape(-1), relative.reshape(-1), angles, tip_distances]).astype(np.float32)
+    return extract_single_hand_features(points)
 
 
 def result_to_features(result: Any) -> tuple[np.ndarray, int]:
-    """Return a fixed 282-float vector: two 140-value hand slots plus presence flags."""
-    slots: dict[str, np.ndarray | None] = {"Left": None, "Right": None}
-    hands = getattr(result, "hand_landmarks", []) or []
-    handedness = getattr(result, "handedness", []) or []
-
-    for index, landmarks in enumerate(hands[:MAX_HANDS]):
-        side = None
-        if index < len(handedness) and handedness[index]:
-            try:
-                side = handedness[index][0].category_name
-            except (AttributeError, IndexError, TypeError):
-                side = None
-        if side not in slots or slots.get(side) is not None:
-            center_x = float(np.mean([point.x for point in landmarks]))
-            side = "Left" if center_x < 0.5 else "Right"
-            if slots[side] is not None:
-                side = "Right" if side == "Left" else "Left"
-        slots[side] = _feature_for_hand(landmarks)
-
-    values: list[np.ndarray] = []
-    presence: list[float] = []
-    for side in ("Left", "Right"):
-        vector = slots[side]
-        presence.append(1.0 if vector is not None else 0.0)
-        values.append(vector if vector is not None else np.zeros(140, dtype=np.float32))
-
-    features = np.concatenate(values + [np.asarray(presence, dtype=np.float32)])
-    if features.shape != (FEATURE_DIM,):
-        raise RuntimeError(f"Internal feature size error: expected {FEATURE_DIM}, got {features.shape}.")
-    return features, int(sum(presence))
+    """Return a fixed 282-float vector via shared Feature Schema (v2.0.0)."""
+    return extract_frame_features(result)
 
 
 def draw_hand_overlay(rgb: np.ndarray, result: Any) -> np.ndarray:

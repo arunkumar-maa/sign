@@ -42,6 +42,12 @@ API_PORT = int(os.getenv("API_PORT", "8001"))
 GRADIO_HOST = os.getenv("GRADIO_HOST", "0.0.0.0")
 GRADIO_PORT = int(os.getenv("GRADIO_PORT", "7861"))
 GRADIO_SHARE = os.getenv("GRADIO_SHARE", "false").lower() == "true"
+ALLOWED_ORIGINS = [
+    origin.strip() for origin in os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:7860,http://127.0.0.1:7860,http://localhost:7861,http://127.0.0.1:7861,http://localhost:8000,http://127.0.0.1:8000,http://localhost:8001,http://127.0.0.1:8001"
+    ).split(",") if origin.strip()
+]
 
 # ── Translation ───────────────────────────────────────────────────────────────
 TRANSLATE_PROVIDER = os.getenv("TRANSLATE_PROVIDER", "libre")

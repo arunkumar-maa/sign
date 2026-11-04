@@ -20,18 +20,21 @@ def clean_token(value: str, field_name: str, max_length: int = 48) -> str:
     return value
 
 
+VALID_NUMBER_LABELS = {
+    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
+    "ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE", "TEN"
+}
+
+
 def validate_label(category: str, label: str) -> tuple[str, str]:
     category = (category or "").strip().lower()
     if category not in CATEGORIES:
-        raise ValueError("Choose Word, Alphabet or Number mode.")
+        raise ValueError("Choose Alphabet, Number, or Word mode.")
     label = clean_token(label, "label")
     if category == "alphabet" and not re.fullmatch(r"[A-Z]", label):
-        raise ValueError("Alphabet labels must be one letter from A to Z.")
-    if category == "number" and label not in {
-        "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-        "ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE", "TEN"
-    }:
-        raise ValueError("Number labels must be 0–10 or ZERO–TEN. Confirm that the clip shows the ISL number sign, not just a finger count.")
+        raise ValueError("Alphabet labels must be a single uppercase letter from A to Z.")
+    if category == "number" and label not in VALID_NUMBER_LABELS:
+        raise ValueError("Number labels must be 0–10 or ZERO–TEN.")
     return category, label
 
 

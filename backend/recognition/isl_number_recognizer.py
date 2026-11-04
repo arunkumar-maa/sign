@@ -1,26 +1,12 @@
 """
-SignBridge AI — Phase 3: Indian Sign Language (ISL) Number Recognizer.
-Recognizes actual ISL number signs (0 through 9) using verified ISL standards:
-- ISL 0: Closed fist or circular 'O' shape.
-- ISL 1: Index finger extended, palm facing forward, others folded.
-- ISL 2: Index and Middle fingers extended in V-shape, others folded.
-- ISL 3: Thumb, Index, and Middle fingers extended (standard ISL 3).
-- ISL 4: Four fingers (Index, Middle, Ring, Pinky) extended, thumb folded across palm.
-- ISL 5: All 5 fingers extended open palm facing forward.
-- ISL 6: Thumb touches Pinky fingertip, 3 other fingers extended upright.
-- ISL 7: Thumb touches Ring fingertip, 3 other fingers extended upright.
-- ISL 8: Thumb touches Middle fingertip, 3 other fingers extended upright.
-- ISL 9: Thumb touches Index fingertip, 3 other fingers extended upright.
-
-STRICT REQUIREMENTS:
-- Separate from finger counter (Finger count diagnostic vs. semantic ISL number).
-- Does not use ASL number conventions.
-- Displays 'Unknown Sign' for ambiguous or non-number handshapes.
-- Supports optional trained Keras model with geometric fallback.
+SignBridge AI — Phase 3: Indian Sign Language (ISL) Number Recognizer (0–9).
+Dedicated recognizer for Indian Sign Language numbers (10 classes: 0 through 9).
+Evaluates 30-frame hand landmark sequences using models/isl_number_model.keras
+conforming strictly to Feature Schema v2.0.0 (282 dimensions).
 """
 
-from dataclasses import dataclass, field
 from collections import deque
+from dataclasses import dataclass, field
 import json
 import logging
 from pathlib import Path
@@ -28,19 +14,14 @@ from typing import Dict, List, Optional, Tuple, Any
 
 import numpy as np
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-DEFAULT_MODEL_PATH = PROJECT_ROOT / "models" / "isl_number_model.keras"
-CAT_MODEL_PATH = PROJECT_ROOT / "models" / "number" / "hand_sequence_lstm.keras"
-HAND_POSE_MODEL_PATH = PROJECT_ROOT / "models" / "hand_pose" / "isl_numbers.keras"
-
-DEFAULT_LABELS_PATH = PROJECT_ROOT / "models" / "number_labels.json"
-CAT_LABELS_PATH = PROJECT_ROOT / "models" / "number" / "labels.json"
-HAND_POSE_LABELS_PATH = PROJECT_ROOT / "models" / "hand_pose" / "number_labels.json"
-
-SEQUENCE_LENGTH = 30
-FEATURE_DIM = 282
-
-
+from backend.vision.feature_schema import (
+    FEATURE_DIM,
+    SEQUENCE_LENGTH,
+    IncompatibleModelError,
+    resample_sequence,
+    validate_features,
+    verify_model_compatibility,
+)
 from backend.vision.hand_pose_features import (
     calculate_angle_3d,
     WRIST,
@@ -58,6 +39,12 @@ from backend.vision.hand_pose_features import (
 from backend.recognition.finger_counter import FingerCounter
 
 logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+DEFAULT_MODEL_PATH = PROJECT_ROOT / "models" / "isl_number_model.keras"
+CAT_MODEL_PATH = PROJECT_ROOT / "models" / "number" / "hand_sequence_lstm.keras"
+DEFAULT_LABELS_PATH = PROJECT_ROOT / "models" / "number_labels.json"
+CAT_LABELS_PATH = PROJECT_ROOT / "models" / "number" / "labels.json"
 
 
 @dataclass
@@ -81,7 +68,7 @@ class ISLNumberResult:
 class ISLNumberRecognizer:
     """
     Dedicated Indian Sign Language (ISL) Number Recognizer (Digits 0-9).
-    Combines trained number classifier with strict geometric syntactic verification.
+    Evaluates 282-dim sequences via trained BiLSTM with fallback to geometric rules.
     """
 
     ISL_NUMBER_NAMES = {
@@ -101,33 +88,62 @@ class ISLNumberRecognizer:
         self,
         model_path: Optional[Path] = None,
         labels_path: Optional[Path] = None,
-        min_confidence: float = 0.55,
+        min_confidence: float = 0.50,
         sequence_length: int = SEQUENCE_LENGTH,
     ):
-        self.model_path = model_path
-        self.labels_path = labels_path
+        self.model_path = model_path or (DEFAULT_MODEL_PATH if DEFAULT_MODEL_PATH.exists() else CAT_MODEL_PATH)
+        self.labels_path = labels_path or (DEFAULT_LABELS_PATH if DEFAULT_LABELS_PATH.exists() else CAT_LABELS_PATH)
         self.min_confidence = min_confidence
         self.sequence_length = sequence_length
+
         self.finger_counter = FingerCounter()
+        self.classes: List[str] = [str(i) for i in range(10)]
+        self.id_to_label: Dict[int, str] = {i: str(i) for i in range(10)}
+        self.label_to_id: Dict[str, int] = {str(i): i for i in range(10)}
+        self._load_labels()
+
         self.trained_model = None
         self._load_model()
+
         self._buffer: deque = deque(maxlen=self.sequence_length)
         self._last_number: Optional[int] = None
         self._last_conf: float = 0.0
 
-    def _load_model(self):
-        """Attempt to load trained Keras number model if available."""
-        import tensorflow as tf
-        candidates = [self.model_path, DEFAULT_MODEL_PATH, CAT_MODEL_PATH, HAND_POSE_MODEL_PATH]
-        for p in candidates:
-            if p and p.exists():
+    def _load_labels(self):
+        """Load number class mappings."""
+        for p in [self.labels_path, DEFAULT_LABELS_PATH, CAT_LABELS_PATH]:
+            if p and Path(p).exists():
                 try:
-                    self.trained_model = tf.keras.models.load_model(str(p), compile=False)
-                    logger.info("ISLNumberRecognizer: Loaded trained model from %s", p)
+                    with open(p, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    self.classes = data.get("classes") or data.get("labels") or self.classes
+                    if "id_to_label" in data:
+                        self.id_to_label = {int(k): str(v) for k, v in data["id_to_label"].items()}
+                    else:
+                        self.id_to_label = {i: str(c) for i, c in enumerate(self.classes)}
+                    self.label_to_id = {str(k): int(v) for k, v in data.get("class_to_id", {c: i for i, c in enumerate(self.classes)}).items()}
+                    logger.info("ISLNumberRecognizer: Loaded %d number classes from %s", len(self.classes), p)
                     return
                 except Exception as e:
+                    logger.warning("ISLNumberRecognizer: Failed loading labels from %s: %s", p, e)
+
+    def _load_model(self):
+        """Load trained Keras number model and verify schema compatibility."""
+        import tensorflow as tf
+        candidates = [self.model_path, DEFAULT_MODEL_PATH, CAT_MODEL_PATH]
+        for p in candidates:
+            if p and Path(p).exists():
+                try:
+                    loaded = tf.keras.models.load_model(str(p), compile=False)
+                    verify_model_compatibility(loaded, expected_dim=FEATURE_DIM, expected_seq_len=self.sequence_length)
+                    self.trained_model = loaded
+                    logger.info("ISLNumberRecognizer: Loaded compatible model from %s", p)
+                    return
+                except IncompatibleModelError as ime:
+                    logger.error("ISLNumberRecognizer: Rejected incompatible model at %s: %s", p, ime)
+                except Exception as e:
                     logger.warning("ISLNumberRecognizer: Could not load model from %s: %s", p, e)
-        logger.info("ISLNumberRecognizer: No trained number model found; will report Model Not Available")
+        logger.info("ISLNumberRecognizer: No compatible trained number model found at %s", self.model_path)
 
     @property
     def is_loaded(self) -> bool:
@@ -147,11 +163,9 @@ class ISLNumberRecognizer:
         if not has_hands or feature_vector is None:
             self._buffer.clear()
             return
-        if len(feature_vector) != FEATURE_DIM:
-            vec = np.zeros(FEATURE_DIM, dtype=np.float32)
-            n = min(len(feature_vector), FEATURE_DIM)
-            vec[:n] = feature_vector[:n]
-            feature_vector = vec
+        if not validate_features(feature_vector):
+            logger.debug("ISLNumberRecognizer: Rejected invalid feature vector of shape %s", getattr(feature_vector, 'shape', None))
+            return
         self._buffer.append(feature_vector.astype(np.float32))
 
     def predict(self) -> Dict[str, Any]:
@@ -159,6 +173,7 @@ class ISLNumberRecognizer:
         if not self.is_loaded:
             return {
                 "number": None,
+                "label": "Model Not Available",
                 "confidence": 0.0,
                 "status": "Model Not Available",
                 "is_model_available": False,
@@ -167,19 +182,13 @@ class ISLNumberRecognizer:
         if len(self._buffer) < 10:
             return {
                 "number": None,
+                "label": "Collecting",
                 "confidence": 0.0,
                 "status": f"Collecting number frames ({len(self._buffer)}/{self.sequence_length})",
                 "is_model_available": True,
             }
 
-        seq = np.asarray(self._buffer, dtype=np.float32)
-        if len(seq) != self.sequence_length:
-            positions = np.linspace(0, len(seq) - 1, self.sequence_length)
-            left = np.floor(positions).astype(int)
-            right = np.ceil(positions).astype(int)
-            weight = (positions - left)[:, None].astype(np.float32)
-            seq = (seq[left] * (1.0 - weight) + seq[right] * weight).astype(np.float32)
-
+        seq = resample_sequence(np.asarray(self._buffer, dtype=np.float32), target_length=self.sequence_length)
         batch = np.expand_dims(seq, axis=0)
         try:
             probs = self.trained_model.predict(batch, verbose=0)[0]
@@ -189,6 +198,7 @@ class ISLNumberRecognizer:
             if top_conf < self.min_confidence:
                 return {
                     "number": None,
+                    "label": "Unknown",
                     "confidence": top_conf,
                     "status": "Unknown Sign",
                     "is_model_available": True,
@@ -196,17 +206,20 @@ class ISLNumberRecognizer:
 
             self._last_number = top_idx
             self._last_conf = top_conf
-            num_name = self.ISL_NUMBER_NAMES.get(top_idx, str(top_idx))
+            num_str = str(top_idx)
+            num_name = self.ISL_NUMBER_NAMES.get(top_idx, num_str)
             return {
                 "number": top_idx,
+                "label": num_str,
                 "confidence": top_conf,
-                "status": f"Number {top_idx} ({num_name})",
+                "status": f"Number {num_str} ({num_name})",
                 "is_model_available": True,
             }
         except Exception as e:
             logger.error("ISLNumberRecognizer: Inference error: %s", e)
             return {
                 "number": None,
+                "label": "Error",
                 "confidence": 0.0,
                 "status": f"Inference Error: {e}",
                 "is_model_available": True,
@@ -218,7 +231,7 @@ class ISLNumberRecognizer:
         handedness: str = "Right",
     ) -> ISLNumberResult:
         """
-        Recognize ISL Number sign from 21 MediaPipe hand landmarks.
+        Recognize ISL Number sign from 21 MediaPipe hand landmarks using geometric kinematics.
 
         Args:
             landmarks: shape (21, 3)
@@ -236,7 +249,7 @@ class ISLNumberRecognizer:
         if palm_scale < 1e-5:
             palm_scale = 1.0
 
-        # Step 1: Geometric finger extension state
+        # Geometric finger extension state
         f_res = self.finger_counter.count_fingers(lms, handedness=handedness)
         ext = f_res.extended_fingers
         thumb = ext["thumb"]
@@ -246,108 +259,65 @@ class ISLNumberRecognizer:
         pinky = ext["pinky"]
         count = f_res.count
 
-        # Step 2: Fingertip touch detection (Thumb tip to other fingertips)
+        # Fingertip touch detection
         thumb_tip = lms[THUMB_TIP]
         d_thumb_index = float(np.linalg.norm(thumb_tip - lms[INDEX_TIP])) / palm_scale
         d_thumb_middle = float(np.linalg.norm(thumb_tip - lms[MIDDLE_TIP])) / palm_scale
         d_thumb_ring = float(np.linalg.norm(thumb_tip - lms[RING_TIP])) / palm_scale
         d_thumb_pinky = float(np.linalg.norm(thumb_tip - lms[PINKY_TIP])) / palm_scale
 
-        TOUCH_THRESHOLD = 0.32  # Normalized touch threshold
+        TOUCH_THRESHOLD = 0.35
 
         touch_index = d_thumb_index < TOUCH_THRESHOLD
         touch_middle = d_thumb_middle < TOUCH_THRESHOLD
         touch_ring = d_thumb_ring < TOUCH_THRESHOLD
         touch_pinky = d_thumb_pinky < TOUCH_THRESHOLD
 
-        pred_num: Optional[int] = None
-        conf: float = 0.0
-        desc: str = ""
+        # Guard: Reject isolated single finger non-ISL gestures (pinky only, thumb only)
+        if (pinky and not index and not middle and not ring) or (thumb and not index and not middle and not ring and not pinky):
+            return ISLNumberResult(number=None, label="Unknown Sign", confidence=0.20, is_valid=False, description="Non-number handshape", hand_detected=True)
 
-        # ISL 9: Thumb touching Index tip, remaining 3 extended (Middle, Ring, Pinky)
-        if touch_index and middle and ring and pinky:
-            pred_num = 9
-            conf = 0.92
-            desc = "ISL 9: Thumb touching Index tip, 3 fingers upright"
+        # ISL 0: Closed fist (all fingers folded)
+        if count == 0 and not thumb and not index and not middle and not ring and not pinky:
+            return ISLNumberResult(number=0, label="ZERO", confidence=0.90, is_valid=True, description="Fist / Zero", hand_detected=True)
 
-        # ISL 8: Thumb touching Middle tip, remaining 3 extended (Index, Ring, Pinky)
-        elif touch_middle and index and ring and pinky:
-            pred_num = 8
-            conf = 0.92
-            desc = "ISL 8: Thumb touching Middle tip, 3 fingers upright"
+        if count == 0 and touch_index and not middle and not ring and not pinky:
+            return ISLNumberResult(number=0, label="ZERO", confidence=0.90, is_valid=True, description="Circular O shape / Zero", hand_detected=True)
 
-        # ISL 7: Thumb touching Ring tip, remaining 3 extended (Index, Middle, Pinky)
-        elif touch_ring and index and middle and pinky:
-            pred_num = 7
-            conf = 0.92
-            desc = "ISL 7: Thumb touching Ring tip, 3 fingers upright"
+        # ISL 1: Only index extended
+        if index and not middle and not ring and not pinky:
+            return ISLNumberResult(number=1, label="ONE", confidence=0.92, is_valid=True, description="Index extended", hand_detected=True)
 
-        # ISL 6: Thumb touching Pinky tip, remaining 3 extended (Index, Middle, Ring)
-        elif touch_pinky and index and middle and ring:
-            pred_num = 6
-            conf = 0.92
-            desc = "ISL 6: Thumb touching Pinky tip, 3 fingers upright"
+        # ISL 2: Index and Middle extended
+        if index and middle and not ring and not pinky and not thumb:
+            return ISLNumberResult(number=2, label="TWO", confidence=0.92, is_valid=True, description="Index + Middle extended (V-sign)", hand_detected=True)
 
-        # ISL 5: All 5 fingers extended open palm
-        elif count == 5 and thumb and index and middle and ring and pinky:
-            pred_num = 5
-            conf = 0.95
-            desc = "ISL 5: Five fingers extended open palm"
+        # ISL 3: Thumb, Index, Middle extended
+        if thumb and index and middle and not ring and not pinky:
+            return ISLNumberResult(number=3, label="THREE", confidence=0.90, is_valid=True, description="Thumb + Index + Middle extended", hand_detected=True)
 
-        # ISL 4: Four fingers (Index, Middle, Ring, Pinky) extended, thumb folded across palm
-        elif count == 4 and not thumb and index and middle and ring and pinky:
-            pred_num = 4
-            conf = 0.94
-            desc = "ISL 4: Four fingers upright, thumb folded across palm"
+        # ISL 4: Four fingers extended, thumb folded
+        if index and middle and ring and pinky and not thumb:
+            return ISLNumberResult(number=4, label="FOUR", confidence=0.92, is_valid=True, description="Four fingers extended, thumb folded", hand_detected=True)
 
-        # ISL 3: Thumb, Index, and Middle fingers extended (Standard ISL 3)
-        elif (count == 3 and thumb and index and middle and not ring and not pinky) or (
-            count == 3 and not thumb and index and middle and ring and not pinky
-        ):
-            pred_num = 3
-            conf = 0.90
-            desc = "ISL 3: Three fingers extended"
+        # ISL 5: Open hand, all 5 fingers
+        if count == 5:
+            return ISLNumberResult(number=5, label="FIVE", confidence=0.95, is_valid=True, description="All 5 fingers extended open", hand_detected=True)
 
-        # ISL 2: Index and Middle fingers extended upright (V-shape), others folded
-        elif count == 2 and not thumb and index and middle and not ring and not pinky:
-            pred_num = 2
-            conf = 0.95
-            desc = "ISL 2: Index and Middle extended (V-shape)"
+        # ISL 6: Thumb touches Pinky
+        if touch_pinky and (index or middle):
+            return ISLNumberResult(number=6, label="SIX", confidence=0.88, is_valid=True, description="Thumb touching pinky", hand_detected=True)
 
-        # ISL 1: Only Index finger extended upright, thumb over folded fingers
-        elif count == 1 and not thumb and index and not middle and not ring and not pinky:
-            pred_num = 1
-            conf = 0.95
-            desc = "ISL 1: Single index finger extended upright"
+        # ISL 7: Thumb touches Ring
+        if touch_ring and (index or pinky):
+            return ISLNumberResult(number=7, label="SEVEN", confidence=0.88, is_valid=True, description="Thumb touching ring", hand_detected=True)
 
-        # ISL 0: Closed fist (all fingers folded close to palm)
-        elif count == 0 and not thumb and not index and not middle and not ring and not pinky:
-            # Anatomical plausibility: in a true fist, fingertips are curled in towards palm/wrist
-            tip_dists = [
-                float(np.linalg.norm(lms[tip] - lms[WRIST])) / palm_scale
-                for tip in [INDEX_TIP, MIDDLE_TIP, RING_TIP, PINKY_TIP]
-            ]
-            if np.mean(tip_dists) < 1.35:
-                pred_num = 0
-                conf = 0.92
-                desc = "ISL 0: Closed fist"
+        # ISL 8: Thumb touches Middle
+        if touch_middle and (index or pinky):
+            return ISLNumberResult(number=8, label="EIGHT", confidence=0.88, is_valid=True, description="Thumb touching middle", hand_detected=True)
 
-        # Non-matching or ambiguous handshape -> Unknown Sign
-        if pred_num is None or conf < self.min_confidence:
-            return ISLNumberResult(
-                number=None,
-                label="Unknown Sign",
-                confidence=round(conf, 3),
-                is_valid=False,
-                description="Handshape does not match standard ISL numbers (0-9)",
-                hand_detected=True,
-            )
+        # ISL 9: Thumb touches Index
+        if touch_index and (middle or ring):
+            return ISLNumberResult(number=9, label="NINE", confidence=0.88, is_valid=True, description="Thumb touching index", hand_detected=True)
 
-        return ISLNumberResult(
-            number=pred_num,
-            label=self.ISL_NUMBER_NAMES[pred_num],
-            confidence=round(conf, 3),
-            is_valid=True,
-            description=desc,
-            hand_detected=True,
-        )
+        return ISLNumberResult(number=None, label="Unknown Sign", confidence=0.30, is_valid=False, description="Unrecognized handshape", hand_detected=True)

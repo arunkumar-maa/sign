@@ -133,19 +133,35 @@ def _init_services():
     logger.info("All services initialised.")
 
 
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Modern FastAPI Lifespan context manager for startup and shutdown."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    )
+    _init_services()
+    yield
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
         title="SignBridge AI",
-        description="Indian Sign Language to Text and Speech Translator",
-        version="0.1.0",
+        description="Indian Sign Language Alphabet and Numbers Recognition",
+        version="2.0.0",
         docs_url="/api/docs",
         redoc_url="/api/redoc",
+        lifespan=lifespan,
     )
 
+    allowed_origins = getattr(cfg, "ALLOWED_ORIGINS", ["*"])
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=allowed_origins if allowed_origins else ["*"],
+        allow_credentials=True if allowed_origins and "*" not in allowed_origins else False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -163,14 +179,6 @@ def create_app() -> FastAPI:
     app.include_router(translation_router, prefix=prefix, tags=["Translation"])
     app.include_router(speech_router, prefix=prefix, tags=["Audio"])
     app.include_router(conversations_router, prefix=prefix, tags=["History"])
-
-    @app.on_event("startup")
-    async def startup():
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        )
-        _init_services()
 
     return app
 

@@ -29,13 +29,14 @@ def _process_frame(frame, session_id):
         return None, "Waiting for webcam. Click the camera icon to start."
     try:
         rgb = np.asarray(frame, dtype=np.uint8)[:, :, :3]
-        record_status = recording_manager.append_frame(session_id, rgb)
         detector = _get_detector()
         with _DETECTOR_LOCK:
             timestamp = max(time.monotonic_ns() // 1_000_000, _LAST_TIMESTAMP + 1)
             _LAST_TIMESTAMP = timestamp
             result = detector.detect_video(rgb, timestamp)
         hands = getattr(result, "hand_landmarks", []) or []
+        has_hands = len(hands) > 0
+        record_status = recording_manager.append_frame(session_id, rgb, has_hands=has_hands)
         annotated = draw_hand_overlay(rgb, result)
         landmark_counts = [len(hand) for hand in hands]
         valid_hands = sum(1 for count in landmark_counts if count == 21)
@@ -64,10 +65,31 @@ def _stop_recording(session_id):
 
 def _refresh_counts():
     counts = sample_counts()
-    lines = ["### Saved recording counts"]
-    for category in CATEGORIES:
-        lines.append(f"**{category.title()}**: " + (", ".join(f"{k}: {v}" for k, v in sorted(counts[category].items())) or "No samples yet"))
-    return "\n\n".join(lines)
+    lines = ["### Saved Dataset Statistics"]
+
+    # Alphabet statistics
+    alph_counts = counts.get("alphabet", {})
+    all_letters = [chr(i) for i in range(ord("A"), ord("Z") + 1)]
+    missing_letters = [l for l in all_letters if l not in alph_counts or alph_counts[l] == 0]
+    total_alph = sum(alph_counts.values())
+    lines.append(f"**Alphabet (A–Z)** — Total Samples: {total_alph} across {len(alph_counts)}/26 classes.")
+    if alph_counts:
+        lines.append("• Recorded: " + ", ".join(f"{k}: {v}" for k, v in sorted(alph_counts.items())))
+    if missing_letters:
+        lines.append(f"• Missing ({len(missing_letters)}): {', '.join(missing_letters)}")
+
+    # Number statistics
+    num_counts = counts.get("number", {})
+    all_digits = [str(i) for i in range(10)]
+    missing_digits = [d for d in all_digits if d not in num_counts or num_counts[d] == 0]
+    total_num = sum(num_counts.values())
+    lines.append(f"\n**Numbers (0–9)** — Total Samples: {total_num} across {len(num_counts)}/10 classes.")
+    if num_counts:
+        lines.append("• Recorded: " + ", ".join(f"{k}: {v}" for k, v in sorted(num_counts.items())))
+    if missing_digits:
+        lines.append(f"• Missing ({len(missing_digits)}): {', '.join(missing_digits)}")
+
+    return "\n".join(lines)
 
 
 def _extract_landmarks():
@@ -98,8 +120,8 @@ def build_data_collection_tab():
         with gr.Row():
             with gr.Column(scale=1):
                 category = gr.Dropdown(
-                    choices=[("ISL Word", "word"), ("ISL Alphabet / Fingerspelling", "alphabet"), ("ISL Number", "number")],
-                    value="word", label="Recognition category"
+                    choices=[("ISL Alphabet (A–Z)", "alphabet"), ("ISL Numbers (0–9)", "number")],
+                    value="alphabet", label="Recognition category"
                 )
                 label = gr.Textbox(label="Exact verified label", placeholder="Example: HELLO, A, TWO")
                 signer_id = gr.Textbox(label="Pseudonymous signer ID", placeholder="Example: S01", value="S01")
@@ -147,7 +169,7 @@ def build_data_collection_tab():
         )
         with gr.Row():
             extract_button = gr.Button("Extract Hand Landmarks", variant="secondary")
-            train_category = gr.Dropdown(choices=list(CATEGORIES), value="word", label="Category to train")
+            train_category = gr.Dropdown(choices=["alphabet", "number"], value="alphabet", label="Category to train")
             epochs = gr.Slider(5, 100, value=30, step=5, label="Training epochs")
             train_button = gr.Button("Train Selected Model", variant="primary")
         job_status = gr.Textbox(label="Extraction / training result", lines=7, interactive=False)
