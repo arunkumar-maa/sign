@@ -1,42 +1,46 @@
 """
-SignBridge AI — Import Fingerspelling Dataset & Train models/isl_fingerspelling_model.keras.
+SignBridge AI — Import Fingerspelling Dataset (ISL Fingerspelling CC BY-NC 4.0).
 Integrates:
 Hugging Face kirandevraj/ISL-Fingerspelling — CC BY-NC 4.0
-- 1,308 continuous video segments, 14,685 character annotations, 3 signers
-- Signer-independent split: signer_00, signer_01 (Train) vs signer_02 (Test)
-- Extracts 282-dim MediaPipe hand landmark sequences (30 frames) for letters A through Z (26 classes)
-- Trains models/isl_fingerspelling_model.keras
-- Saves models/fingerspelling_labels.json and evaluation report with confusion matrix
+- 1,308 continuous video segments, 14,685 character annotations, 3 genuine signers
+- Downloads curated video segments covering all letters A-Z (26 classes)
+- Extracts 282-dim MediaPipe hand landmark sequences (30 frames)
+- Registers genuine samples in data/isl_signs/landmarks.jsonl
+- Pure import pipeline: all model training logic belongs in scripts/train_alphabet.py
 """
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
 import logging
 import os
+from pathlib import Path
 import sys
 import time
-import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
+import urllib.request
 
 import cv2
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from isl_data_collection.config import (
-    DATA_ROOT, FEATURE_DIM, FEATURE_DIR, LANDMARK_MANIFEST,
-    MODEL_DIR, SAMPLES_MANIFEST, SEQUENCE_LENGTH,
+    DATA_ROOT,
+    FEATURE_DIM,
+    FEATURE_DIR,
+    LANDMARK_MANIFEST,
+    SEQUENCE_LENGTH,
 )
-from isl_data_collection.hand_landmarks import HandPoseDetector, ensure_hand_task_model, result_to_features
-from isl_data_collection.storage import append_landmark_record, append_sample
+from isl_data_collection.hand_landmarks import ensure_hand_task_model, result_to_features
+from isl_data_collection.storage import append_landmark_record
+from backend.vision.feature_schema import resample_sequence, validate_sequence
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("import_fingerspelling")
 
 HF_FS_BASE = "https://huggingface.co/datasets/kirandevraj/ISL-Fingerspelling"
 ANN_URL = f"{HF_FS_BASE}/raw/main/letter_annotations.csv"
@@ -109,7 +113,7 @@ def download_curated_videos(selected_uids: List[str], max_workers: int = 4) -> D
         ok = download_file(url, dest, timeout=40)
         return uid, dest if ok and dest.exists() and dest.stat().st_size > 1000 else None
 
-    logger.info("Downloading %d segment videos from Hugging Face...", len(selected_uids))
+    logger.info("Checking / downloading %d segment videos from Hugging Face...", len(selected_uids))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(fetch_uid, uid): uid for uid in selected_uids}
         for future in as_completed(futures):
@@ -117,8 +121,7 @@ def download_curated_videos(selected_uids: List[str], max_workers: int = 4) -> D
             if path:
                 downloaded_map[uid] = path
 
-    logger.info("Successfully staged %d/%d segment videos locally.",
-                len(downloaded_map), len(selected_uids))
+    logger.info("Successfully staged %d/%d segment videos locally.", len(downloaded_map), len(selected_uids))
     return downloaded_map
 
 
@@ -128,18 +131,20 @@ def extract_character_features(
     end_frame: int,
     detector: Any,
 ) -> Optional[np.ndarray]:
-    """Extract frames for [start_frame, end_frame] and run MediaPipe Tasks HandLandmarker."""
+    """
+    Extract frames for [start_frame, end_frame] and run MediaPipe Tasks HandLandmarker.
+    Returns resampled (30, 282) sequence or None.
+    """
     import mediapipe as mp
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         return None
 
-    vectors = []
+    vectors: List[np.ndarray] = []
     current_frame = 0
     hands_detected = 0
 
     try:
-        # Seek or fast-forward
         if start_frame > 0:
             cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
             current_frame = start_frame
@@ -166,22 +171,19 @@ def extract_character_features(
     if len(vectors) < 2 or hands_detected == 0:
         return None
 
-    # Resample to exactly SEQUENCE_LENGTH (30 frames)
     arr = np.stack(vectors).astype(np.float32)
-    positions = np.linspace(0, len(arr) - 1, SEQUENCE_LENGTH)
-    left = np.floor(positions).astype(int)
-    right = np.ceil(positions).astype(int)
-    weight = (positions - left)[:, None].astype(np.float32)
-    resampled = (arr[left] * (1.0 - weight) + arr[right] * weight).astype(np.float32)
-    return resampled
+    seq_30 = resample_sequence(arr, target_length=SEQUENCE_LENGTH)
+    if not validate_sequence(seq_30):
+        return None
+    return seq_30
 
 
 def build_fingerspelling_dataset(
     ann_df: pd.DataFrame,
     split_df: pd.DataFrame,
     downloaded_videos: Dict[str, Path],
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[Dict[str, Any]]]:
-    """Extract 30-frame landmark sequences for all character instances."""
+) -> List[Dict[str, Any]]:
+    """Extract 30-frame landmark sequences for all character instances and register records."""
     import mediapipe as mp
     FEATURE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -199,8 +201,7 @@ def build_fingerspelling_dataset(
     merged = merged[merged["char"].isin(ALPHABET_CLASSES)].copy()
     merged = merged[merged["uid"].isin(downloaded_videos.keys())].copy()
 
-    X_list, y_list, signer_list, split_list = [], [], [], []
-    records = []
+    records: List[Dict[str, Any]] = []
 
     logger.info("Extracting character instances from %d annotations...", len(merged))
     for idx, row in merged.iterrows():
@@ -232,11 +233,6 @@ def build_fingerspelling_dataset(
                 np.savez_compressed(npz_path, features=seq)
 
         if seq is not None:
-            X_list.append(seq)
-            y_list.append(ch)
-            signer_list.append(signer)
-            split_list.append(split)
-
             rec = {
                 "sample_id": sample_id,
                 "category": "alphabet",
@@ -254,173 +250,18 @@ def build_fingerspelling_dataset(
             append_landmark_record(rec)
 
     detector.close()
-    logger.info("Successfully extracted %d character instances across all letters.", len(X_list))
-    return (
-        np.asarray(X_list, dtype=np.float32),
-        np.asarray(y_list),
-        np.asarray(signer_list),
-        np.asarray(split_list),
-        records,
-    )
-
-
-def train_fingerspelling_model(
-    X: np.ndarray,
-    y_labels: np.ndarray,
-    signers: np.ndarray,
-    splits: np.ndarray,
-    epochs: int = 35,
-    batch_size: int = 16,
-) -> Dict[str, Any]:
-    """Train fingerspelling model using signer-independent split (signer_02 held out for test)."""
-    import tensorflow as tf
-
-    classes = ALPHABET_CLASSES
-    label_to_index = {label: idx for idx, label in enumerate(classes)}
-    index_to_label = {idx: label for idx, label in enumerate(classes)}
-    y = np.asarray([label_to_index[lbl] for lbl in y_labels], dtype=np.int64)
-
-    # Use dataset's official signer-independent split
-    test_mask = (splits == "test") | (signers == "signer_02")
-    train_val_mask = ~test_mask
-
-    train_val_indices = np.where(train_val_mask)[0]
-    test_indices = np.where(test_mask)[0]
-
-    # Split train_val into 80% train, 20% val
-    from sklearn.model_selection import train_test_split
-    train_indices, val_indices = train_test_split(
-        train_val_indices, test_size=0.20, random_state=42, stratify=y[train_val_indices]
-    )
-
-    logger.info("Signer-independent Split: Train=%d (Signers: %s), Val=%d, Test=%d (Signer: signer_02)",
-                len(train_indices), sorted(list(set(signers[train_indices]))),
-                len(val_indices), len(test_indices))
-
-    # Architecture
-    tf.keras.utils.set_random_seed(42)
-    model = tf.keras.Sequential([
-        tf.keras.layers.Input(shape=(SEQUENCE_LENGTH, FEATURE_DIM), name="input_landmarks"),
-        tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(64, return_sequences=True)),
-        tf.keras.layers.Dropout(0.25),
-        tf.keras.layers.LSTM(48),
-        tf.keras.layers.Dropout(0.25),
-        tf.keras.layers.Dense(64, activation="relu"),
-        tf.keras.layers.Dropout(0.20),
-        tf.keras.layers.Dense(len(classes), activation="softmax", name="letter_probabilities"),
-    ], name="ISL_Fingerspelling_BiLSTM")
-
-    model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-        loss="sparse_categorical_crossentropy",
-        metrics=["accuracy"],
-    )
-
-    callbacks = [
-        tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=8, restore_best_weights=True),
-        tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=3, min_lr=1e-5),
-    ]
-
-    history = model.fit(
-        X[train_indices], y[train_indices],
-        validation_data=(X[val_indices], y[val_indices]),
-        epochs=epochs,
-        batch_size=batch_size,
-        callbacks=callbacks,
-        verbose=1,
-    )
-
-    # Evaluate on held-out signer_02 test split
-    test_probs = model.predict(X[test_indices], verbose=0)
-    test_preds = np.argmax(test_probs, axis=1)
-    test_true = y[test_indices]
-
-    acc = float(accuracy_score(test_true, test_preds))
-    rep = classification_report(
-        test_true, test_preds,
-        labels=list(range(len(classes))),
-        target_names=classes,
-        output_dict=True,
-        zero_division=0,
-    )
-    cm = confusion_matrix(test_true, test_preds, labels=list(range(len(classes)))).tolist()
-
-    logger.info("Held-out Signer Test Accuracy (Alphabet A-Z): %.2f%%", acc * 100.0)
-
-    # Save models
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    model_path = MODEL_DIR / "isl_fingerspelling_model.keras"
-    alphabet_dir = MODEL_DIR / "alphabet"
-    alphabet_dir.mkdir(parents=True, exist_ok=True)
-    cat_model_path = alphabet_dir / "hand_sequence_lstm.keras"
-
-    model.save(str(model_path))
-    model.save(str(cat_model_path))
-    logger.info("Saved models to %s and %s", model_path, cat_model_path)
-
-    # Save label mappings
-    labels_payload = {
-        "version": "1.0.0",
-        "dataset": "kirandevraj/ISL-Fingerspelling",
-        "license": "CC BY-NC 4.0",
-        "category": "alphabet",
-        "feature_dim": FEATURE_DIM,
-        "sequence_length": SEQUENCE_LENGTH,
-        "num_classes": len(classes),
-        "classes": classes,
-        "labels": classes,
-        "label_to_index": label_to_index,
-        "class_to_id": label_to_index,
-        "id_to_label": index_to_label,
-    }
-
-    with open(MODEL_DIR / "fingerspelling_labels.json", "w", encoding="utf-8") as f:
-        json.dump(labels_payload, f, indent=2)
-    with open(alphabet_dir / "labels.json", "w", encoding="utf-8") as f:
-        json.dump(labels_payload, f, indent=2)
-
-    eval_result = {
-        "category": "alphabet",
-        "model_file": "isl_fingerspelling_model.keras",
-        "samples_total": len(X),
-        "train_samples": len(train_indices),
-        "val_samples": len(val_indices),
-        "test_samples": len(test_indices),
-        "classes_count": len(classes),
-        "classes": classes,
-        "test_accuracy": acc,
-        "classification_report": rep,
-        "confusion_matrix": cm,
-        "history": {
-            "loss": [float(v) for v in history.history.get("loss", [])],
-            "val_loss": [float(v) for v in history.history.get("val_loss", [])],
-            "accuracy": [float(v) for v in history.history.get("accuracy", [])],
-            "val_accuracy": [float(v) for v in history.history.get("val_accuracy", [])],
-        },
-        "epochs_completed": len(history.history.get("loss", [])),
-    }
-
-    with open(alphabet_dir / "evaluation.json", "w", encoding="utf-8") as f:
-        json.dump(eval_result, f, indent=2)
-
-    return eval_result
+    logger.info("Successfully registered %d character instances across all letters.", len(records))
+    return records
 
 
 def main():
-    logger.info("=== STEP 2: IMPORT ISL FINGERSPELLING DATASET ===")
+    logger.info("=== STEP: IMPORT ISL FINGERSPELLING DATASET (A–Z) ===")
     ann_df, split_df, selected_uids = stage_annotations_and_select_videos()
     downloaded_videos = download_curated_videos(selected_uids, max_workers=4)
-    X, y, signers, splits, records = build_fingerspelling_dataset(ann_df, split_df, downloaded_videos)
-
-    if len(X) < 20:
-        logger.error("Not enough extracted fingerspelling samples (%d).", len(X))
-        return
-
-    eval_result = train_fingerspelling_model(X, y, signers, splits, epochs=35, batch_size=16)
-    logger.info("ISL Fingerspelling Model Training Complete! Final Test Accuracy: %.2f%%",
-                eval_result["test_accuracy"] * 100.0)
+    records = build_fingerspelling_dataset(ann_df, split_df, downloaded_videos)
+    logger.info("Fingerspelling import complete: %d records processed. Ready for training via scripts/train_alphabet.py.",
+                len(records))
 
 
 if __name__ == "__main__":
     main()
-

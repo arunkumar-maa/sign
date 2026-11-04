@@ -35,17 +35,20 @@ class ISLFingerspellingRecognizer:
     """
     Dedicated ISL Alphabet / Fingerspelling (A-Z) classifier.
     Operates on a sliding 30-frame window of 282-dim hand landmarks.
+    Enforces top-1 vs top-2 confidence margin gating to prevent flickering between close signs.
     """
 
     def __init__(
         self,
         sequence_length: int = SEQUENCE_LENGTH,
         min_confidence: float = 0.50,
+        margin_threshold: float = 0.10,
         model_path: Optional[Path] = None,
         labels_path: Optional[Path] = None,
     ):
         self.sequence_length = sequence_length
         self.min_confidence = min_confidence
+        self.margin_threshold = margin_threshold
         self.model_path = model_path or (DEFAULT_MODEL_PATH if DEFAULT_MODEL_PATH.exists() else CAT_MODEL_PATH)
         self.labels_path = labels_path or (DEFAULT_LABELS_PATH if DEFAULT_LABELS_PATH.exists() else CAT_LABELS_PATH)
 
@@ -87,6 +90,10 @@ class ISLFingerspellingRecognizer:
                 try:
                     loaded = tf.keras.models.load_model(str(p), compile=False)
                     verify_model_compatibility(loaded, expected_dim=FEATURE_DIM, expected_seq_len=self.sequence_length)
+                    if hasattr(loaded, "output_shape") and loaded.output_shape is not None:
+                        out_dim = loaded.output_shape[-1]
+                        if out_dim != 26:
+                            raise IncompatibleModelError(f"Alphabet model output shape {loaded.output_shape} != 26 classes.")
                     self.model = loaded
                     logger.info("ISLFingerspellingRecognizer: Successfully loaded compatible model from %s", p)
                     return
@@ -151,11 +158,26 @@ class ISLFingerspellingRecognizer:
 
         try:
             probs = self.model.predict(batch, verbose=0)[0]
-            top_idx = int(np.argmax(probs))
-            top_conf = float(probs[top_idx])
-            pred_letter = self.id_to_label.get(top_idx, self.classes[top_idx] if top_idx < len(self.classes) else "?")
+            if len(probs) != len(self.classes):
+                logger.error("Output dimension mismatch: %d != %d", len(probs), len(self.classes))
+                return {
+                    "letter": None,
+                    "word": None,
+                    "label": "Error",
+                    "confidence": 0.0,
+                    "status": "Model Dimension Mismatch",
+                    "is_new_sign": False,
+                    "is_model_available": True,
+                }
 
-            if top_conf < self.min_confidence:
+            sorted_indices = np.argsort(probs)[::-1]
+            top_idx = int(sorted_indices[0])
+            top_conf = float(probs[top_idx])
+            second_conf = float(probs[sorted_indices[1]]) if len(sorted_indices) > 1 else 0.0
+            margin = top_conf - second_conf
+
+            # Gating: must exceed minimum confidence AND separate from runner-up by margin
+            if top_conf < self.min_confidence or margin < self.margin_threshold:
                 return {
                     "letter": None,
                     "word": None,
@@ -166,6 +188,7 @@ class ISLFingerspellingRecognizer:
                     "is_model_available": True,
                 }
 
+            pred_letter = self.id_to_label.get(top_idx, self.classes[top_idx] if top_idx < len(self.classes) else "?")
             self._last_letter = pred_letter
             self._last_conf = top_conf
 

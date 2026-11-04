@@ -14,7 +14,7 @@ HAND_TASK_URL = (
     "hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
 )
 
-CATEGORIES = ("word", "alphabet", "number")
+CATEGORIES = ("alphabet", "number")
 MAX_HANDS = 2
 FEATURE_DIM = 282  # two hands * (126 coordinates + 10 angles + 4 distances) + two presence flags
 SEQUENCE_LENGTH = 30

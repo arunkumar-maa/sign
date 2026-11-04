@@ -15,6 +15,7 @@ import logging
 from pathlib import Path
 import sys
 import urllib.request
+from typing import Dict, Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -39,43 +40,72 @@ ALPHABET_LABELS_PATH = PROJECT_ROOT / "models" / "fingerspelling_labels.json"
 NUMBER_MODEL_PATH = PROJECT_ROOT / "models" / "isl_number_model.keras"
 NUMBER_LABELS_PATH = PROJECT_ROOT / "models" / "number_labels.json"
 
+EXPECTED_ALPHABET_CLASSES = [chr(i) for i in range(ord("A"), ord("Z") + 1)]
+EXPECTED_NUMBER_CLASSES = [str(i) for i in range(10)]
+
 
 def download_mediapipe_task() -> bool:
-    """Download official MediaPipe Tasks hand_landmarker.task if missing."""
+    """
+    Download official MediaPipe Tasks hand_landmarker.task atomically.
+    Downloads to a temporary file, verifies size (> 1MB), then renames.
+    """
     TASK_PATH.parent.mkdir(parents=True, exist_ok=True)
     if TASK_PATH.exists() and TASK_PATH.stat().st_size > 1000000:
         logger.info("MediaPipe task binary already present: %s (%d bytes)", TASK_PATH, TASK_PATH.stat().st_size)
         return True
 
+    tmp_path = TASK_PATH.with_suffix(".task.tmp")
     logger.info("Downloading official MediaPipe HandLandmarker task asset from %s...", MEDIAPIPE_TASK_URL)
     try:
         req = urllib.request.Request(MEDIAPIPE_TASK_URL, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=60) as resp, open(TASK_PATH, "wb") as f:
-            data = resp.read()
-            f.write(data)
-        logger.info("Successfully downloaded hand_landmarker.task (%d bytes)", len(data))
-        return True
+        with urllib.request.urlopen(req, timeout=60) as resp, open(tmp_path, "wb") as f:
+            while chunk := resp.read(65536):
+                f.write(chunk)
+
+        if tmp_path.exists() and tmp_path.stat().st_size > 1000000:
+            tmp_path.replace(TASK_PATH)
+            logger.info("Successfully installed hand_landmarker.task (%d bytes)", TASK_PATH.stat().st_size)
+            return True
+        else:
+            logger.error("Downloaded file too small (%d bytes), discarded.", tmp_path.stat().st_size if tmp_path.exists() else 0)
+            if tmp_path.exists():
+                tmp_path.unlink()
+            return False
     except Exception as exc:
         logger.error("Failed to download hand_landmarker.task: %s", exc)
+        if tmp_path.exists():
+            tmp_path.unlink()
         return False
 
 
-def verify_models():
-    """Verify presence and schema compatibility of trained models."""
+def verify_models() -> Dict[str, Any]:
+    """Verify presence, schema compatibility, and class mappings of trained models."""
     import tensorflow as tf
 
-    status = {}
+    status: Dict[str, Any] = {}
 
-    # Alphabet
+    # Alphabet (A–Z, 26 classes)
     if ALPHABET_MODEL_PATH.exists():
         try:
             m = tf.keras.models.load_model(str(ALPHABET_MODEL_PATH), compile=False)
             verify_model_compatibility(m, expected_dim=FEATURE_DIM, expected_seq_len=SEQUENCE_LENGTH)
+            out_shape = list(m.output_shape)
+            if out_shape[-1] != 26:
+                raise ValueError(f"Alphabet model output shape {out_shape} != 26 classes.")
+
+            # Verify labels file
+            if ALPHABET_LABELS_PATH.exists():
+                with open(ALPHABET_LABELS_PATH, "r", encoding="utf-8") as f:
+                    ldata = json.load(f)
+                lbl_classes = ldata.get("classes") or ldata.get("labels", [])
+                if lbl_classes != EXPECTED_ALPHABET_CLASSES:
+                    logger.warning("Alphabet label file classes mismatch: %s vs expected %s", lbl_classes, EXPECTED_ALPHABET_CLASSES)
+
             status["alphabet"] = {
                 "available": True,
                 "path": str(ALPHABET_MODEL_PATH),
                 "input_shape": list(m.input_shape),
-                "output_shape": list(m.output_shape),
+                "output_shape": out_shape,
             }
             logger.info("Alphabet Model: AVAILABLE & VERIFIED (Input: %s, Output: %s)", m.input_shape, m.output_shape)
         except IncompatibleModelError as ime:
@@ -93,16 +123,28 @@ def verify_models():
         logger.warning("Alphabet Model: NOT FOUND at %s", ALPHABET_MODEL_PATH)
         logger.info("-> To train: python scripts/train_alphabet.py")
 
-    # Numbers
+    # Numbers (0–9, 10 classes)
     if NUMBER_MODEL_PATH.exists():
         try:
             m = tf.keras.models.load_model(str(NUMBER_MODEL_PATH), compile=False)
             verify_model_compatibility(m, expected_dim=FEATURE_DIM, expected_seq_len=SEQUENCE_LENGTH)
+            out_shape = list(m.output_shape)
+            if out_shape[-1] != 10:
+                raise ValueError(f"Number model output shape {out_shape} != 10 classes.")
+
+            # Verify labels file
+            if NUMBER_LABELS_PATH.exists():
+                with open(NUMBER_LABELS_PATH, "r", encoding="utf-8") as f:
+                    ldata = json.load(f)
+                lbl_classes = ldata.get("classes") or ldata.get("labels", [])
+                if lbl_classes != EXPECTED_NUMBER_CLASSES:
+                    logger.warning("Number label file classes mismatch: %s vs expected %s", lbl_classes, EXPECTED_NUMBER_CLASSES)
+
             status["numbers"] = {
                 "available": True,
                 "path": str(NUMBER_MODEL_PATH),
                 "input_shape": list(m.input_shape),
-                "output_shape": list(m.output_shape),
+                "output_shape": out_shape,
             }
             logger.info("Number Model: AVAILABLE & VERIFIED (Input: %s, Output: %s)", m.input_shape, m.output_shape)
         except IncompatibleModelError as ime:
@@ -136,17 +178,16 @@ def main():
 
     if args.train:
         if not status["alphabet"]["available"]:
-            logger.info("Training missing alphabet model...")
-            from scripts.train_alphabet import main as train_alph
-            train_alph()
+            logger.info("Training missing alphabet model programmatically...")
+            from scripts.train_alphabet import train_alphabet_model
+            train_alphabet_model()
         if not status["numbers"]["available"]:
-            logger.info("Training missing numbers model...")
-            from scripts.train_numbers import main as train_num
-            train_num()
+            logger.info("Training missing numbers model programmatically...")
+            from scripts.train_numbers import train_number_model
+            train_number_model()
 
     logger.info("Setup and verification complete.")
 
 
 if __name__ == "__main__":
     main()
-

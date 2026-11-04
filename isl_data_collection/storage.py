@@ -31,7 +31,7 @@ VALID_NUMBER_SET = set(VALID_NUMBER_CLASSES)
 def validate_label(category: str, label: str) -> tuple[str, str]:
     category = (category or "").strip().lower()
     if category not in CATEGORIES:
-        raise ValueError("Choose Alphabet, Number, or Word mode.")
+        raise ValueError("Choose Alphabet or Number mode.")
     label = clean_token(label, "label")
     if category == "alphabet" and not re.fullmatch(r"[A-Z]", label):
         raise ValueError("Alphabet labels must be a single uppercase letter from A to Z.")

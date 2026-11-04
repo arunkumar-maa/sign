@@ -113,7 +113,7 @@ def build_data_collection_tab():
     with gr.Tab("ISL Data Collection"):
         gr.Markdown(
             "## Record and label your own ISL training examples\n"
-            "Collect **words, alphabet/fingerspelling and numbers separately**. "
+            "Collect **alphabet/fingerspelling and numbers separately**. "
             "The original unannotated webcam video is saved for training; the preview may show landmarks."
         )
         session_id = gr.State(value=lambda: uuid.uuid4().hex)
@@ -123,7 +123,7 @@ def build_data_collection_tab():
                     choices=[("ISL Alphabet (A–Z)", "alphabet"), ("ISL Numbers (0–9)", "number")],
                     value="alphabet", label="Recognition category"
                 )
-                label = gr.Textbox(label="Exact verified label", placeholder="Example: HELLO, A, TWO")
+                label = gr.Textbox(label="Exact verified label", placeholder="Example: A, B, ..., Z or 0, 1, ..., 9")
                 signer_id = gr.Textbox(label="Pseudonymous signer ID", placeholder="Example: S01", value="S01")
                 consent = gr.Checkbox(label="I have permission/consent to record this signer", value=False)
                 with gr.Row():

@@ -3,10 +3,13 @@ import numpy as np
 
 from isl_data_collection.storage import validate_label
 from isl_data_collection.training import _resample_sequence
-from isl_data_collection.config import FEATURE_DIM, SEQUENCE_LENGTH
+from isl_data_collection.config import FEATURE_DIM, SEQUENCE_LENGTH, CATEGORIES
 
 
 class CoreWorkflowTests(unittest.TestCase):
+    def test_categories_only_alphabet_and_number(self):
+        self.assertEqual(set(CATEGORIES), {"alphabet", "number"})
+
     def test_alphabet_label_validation(self):
         self.assertEqual(validate_label("alphabet", "a"), ("alphabet", "A"))
         self.assertEqual(validate_label("alphabet", "z"), ("alphabet", "Z"))
@@ -33,8 +36,10 @@ class CoreWorkflowTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_label("number", "-1")
 
-    def test_word_label_validation(self):
-        self.assertEqual(validate_label("word", "thank you"), ("word", "THANK_YOU"))
+    def test_word_label_rejected(self):
+        # Word mode has been removed from active data collection
+        with self.assertRaises(ValueError):
+            validate_label("word", "thank you")
 
     def test_resampling_shape(self):
         data = np.random.default_rng(7).random((17, FEATURE_DIM), dtype=np.float32)

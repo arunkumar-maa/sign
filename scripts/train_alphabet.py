@@ -10,7 +10,7 @@ import json
 import logging
 from pathlib import Path
 import sys
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 
 import numpy as np
 
@@ -103,17 +103,16 @@ def build_alphabet_model(num_classes: int = 26):
     return model
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Train ISL Alphabet Fingerspelling Model")
-    parser.add_argument("--epochs", type=int, default=25, help="Number of training epochs")
-    parser.add_argument("--batch-size", type=int, default=16, help="Batch size")
-    args = parser.parse_args()
-
+def train_alphabet_model(epochs: int = 25, batch_size: int = 16) -> Dict[str, Any]:
+    """
+    Programmatic entry point for training the ISL Alphabet (A-Z) model.
+    Enforces genuine signer-independent splits without argparse or sys.argv conflicts.
+    """
     X, y, signers = load_dataset()
     if len(X) == 0:
         logger.error("No valid alphabet samples found in %s", DATA_MANIFEST)
         logger.info("Run `python scripts/import_fingerspelling.py` to download and extract dataset.")
-        return
+        return {"status": "error", "message": "No valid alphabet samples found"}
 
     # Check unique signers: genuine signer-independent training requires >= 3 distinct signer IDs
     unique_signers = sorted(list(set(signers)))
@@ -165,12 +164,12 @@ def main():
     model = build_alphabet_model(num_classes=len(ALPHABET_CLASSES))
     verify_model_compatibility(model, expected_dim=FEATURE_DIM, expected_seq_len=SEQUENCE_LENGTH)
 
-    logger.info("Beginning training for %d epochs...", args.epochs)
-    model.fit(
+    logger.info("Beginning training for %d epochs...", epochs)
+    history = model.fit(
         X_train, y_train,
         validation_data=(X_val, y_val),
-        epochs=args.epochs,
-        batch_size=args.batch_size,
+        epochs=epochs,
+        batch_size=batch_size,
         verbose=1,
     )
 
@@ -205,28 +204,41 @@ def main():
         logger.info("Saved labels to %s", lbl_p)
 
     # Save evaluation report
+    eval_data = {
+        "is_signer_independent": True,
+        "split_type": "signer_independent",
+        "signer_split": {
+            "train_signers": train_signers,
+            "val_signers": [val_signer],
+            "test_signers": [test_signer],
+        },
+        "sample_counts": {
+            "total": int(len(X)),
+            "train": int(len(X_train)),
+            "val": int(len(X_val)),
+            "test": int(len(X_test)),
+        },
+        "per_class_test_samples": per_class_test_samples,
+        "test_accuracy": float(test_acc),
+        "test_loss": float(test_loss),
+        "present_classes": [ID_TO_LABEL[i] for i in present_classes],
+        "missing_classes": missing,
+        "epochs_completed": len(history.history.get("loss", [])),
+    }
     EVAL_REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(EVAL_REPORT_PATH, "w", encoding="utf-8") as f:
-        json.dump({
-            "split_type": "signer_independent",
-            "signer_split": {
-                "train_signers": train_signers,
-                "val_signers": [val_signer],
-                "test_signers": [test_signer],
-            },
-            "sample_counts": {
-                "total": int(len(X)),
-                "train": int(len(X_train)),
-                "val": int(len(X_val)),
-                "test": int(len(X_test)),
-            },
-            "per_class_test_samples": per_class_test_samples,
-            "test_accuracy": float(test_acc),
-            "test_loss": float(test_loss),
-            "present_classes": [ID_TO_LABEL[i] for i in present_classes],
-            "missing_classes": missing,
-        }, f, indent=2)
+        json.dump(eval_data, f, indent=2)
     logger.info("Saved evaluation report to %s", EVAL_REPORT_PATH)
+
+    return eval_data
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Train ISL Alphabet Fingerspelling Model")
+    parser.add_argument("--epochs", type=int, default=25, help="Number of training epochs")
+    parser.add_argument("--batch-size", type=int, default=16, help="Batch size")
+    args = parser.parse_args()
+    train_alphabet_model(epochs=args.epochs, batch_size=args.batch_size)
 
 
 if __name__ == "__main__":

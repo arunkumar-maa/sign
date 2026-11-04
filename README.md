@@ -117,7 +117,7 @@ If model files are not present on disk, the UI gracefully displays **"Model Not 
 ### Step 1: Clone Repository
 ```powershell
 git clone https://github.com/arunkumar-maa/sign.git
-cd "sign 2"
+cd sign
 ```
 
 ### Step 2: Create & Activate Virtual Environment
@@ -186,15 +186,14 @@ Run dedicated training scripts directly from PowerShell:
 # Train Alphabet Model (A–Z, 26 classes) - Strictly evaluated on held-out signer_02
 python scripts/train_alphabet.py --epochs 25 --batch-size 16
 
-# Train Numbers Model (0–9, 10 classes) - Strictly evaluated on held-out signers
+# Train Numbers Model (0–9, 10 classes) - Evaluated on ISLRTC canonical master sequences
 python scripts/train_numbers.py --epochs 30 --batch-size 16
 ```
 
-Both scripts:
-- Enforce genuine 3-way signer-independent partitioning (Train, Validation, Test).
-- Prohibit random `train_test_split` fallbacks.
-- Require at least 3 distinct signer IDs in the dataset or fail immediately with an informative error.
-- Record train signers, validation signers, test signers, and per-class test sample counts in `models/*/evaluation.json`.
+Training specifications:
+- `train_alphabet.py`: Enforces genuine 3-way signer-independent partitioning (Train on `signer_00`, Val on `signer_01`, Test on held-out `signer_02`).
+- `train_numbers.py`: Uses genuine master signer sequences from official ISLRTC Data.gov data (`islrtc_master`). Transparently documents single-signer status (`is_signer_independent: false`); multi-signer benchmarks require recording $\ge 3$ distinct signers via `isl_data_collection`.
+- Both scripts save full evaluation reports and class mappings to `models/*/evaluation.json`.
 
 ---
 
@@ -204,7 +203,7 @@ Run the full automated test suite:
 
 ```powershell
 # Run Alphabet & Numbers comprehensive verification suite
-python -m pytest tests/test_alphabet_and_numbers_suite.py -v
+python -m pytest tests/test_alphabet_and_numbers_suite.py tests/test_final_repair_verification.py -v
 
 # Run full project test suite
 python -m pytest -v

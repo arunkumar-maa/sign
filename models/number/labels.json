@@ -1,7 +1,6 @@
 {
-  "version": "1.0.0",
+  "version": "2.0.0",
   "dataset": "silentone0725/Indian_Sign_Language_Data.gov_Rencoded",
-  "license": "OGDL - India",
   "category": "number",
   "feature_dim": 282,
   "sequence_length": 30,

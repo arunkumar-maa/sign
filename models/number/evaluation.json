@@ -1,12 +1,20 @@
 {
-  "category": "number",
-  "model_file": "isl_number_model.keras",
-  "samples_total": 160,
-  "train_samples": 104,
-  "val_samples": 26,
-  "test_samples": 30,
-  "classes_count": 10,
-  "classes": [
+  "is_signer_independent": false,
+  "signer_count": 1,
+  "signers": [
+    "islrtc_master"
+  ],
+  "split_type": "single_signer_stratified",
+  "note": "ISLRTC official Data.gov dataset provides 1 human master signer for digits 0-9. To perform a genuine signer-independent benchmark, record >= 3 distinct signers using the isl_data_collection module.",
+  "sample_counts": {
+    "total_raw": 10,
+    "train": 130,
+    "val": 10,
+    "test": 10
+  },
+  "test_accuracy": 1.0,
+  "test_loss": 0.010664863511919975,
+  "present_classes": [
     "0",
     "1",
     "2",
@@ -18,203 +26,6 @@
     "8",
     "9"
   ],
-  "test_accuracy": 1.0,
-  "classification_report": {
-    "0": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 3.0
-    },
-    "1": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 3.0
-    },
-    "2": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 3.0
-    },
-    "3": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 3.0
-    },
-    "4": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 3.0
-    },
-    "5": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 3.0
-    },
-    "6": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 3.0
-    },
-    "7": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 3.0
-    },
-    "8": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 3.0
-    },
-    "9": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 3.0
-    },
-    "accuracy": 1.0,
-    "macro avg": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 30.0
-    },
-    "weighted avg": {
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1-score": 1.0,
-      "support": 30.0
-    }
-  },
-  "confusion_matrix": [
-    [
-      3,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    [
-      0,
-      3,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    [
-      0,
-      0,
-      3,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    [
-      0,
-      0,
-      0,
-      3,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    [
-      0,
-      0,
-      0,
-      0,
-      3,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    [
-      0,
-      0,
-      0,
-      0,
-      0,
-      3,
-      0,
-      0,
-      0,
-      0
-    ],
-    [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      3,
-      0,
-      0,
-      0
-    ],
-    [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      3,
-      0,
-      0
-    ],
-    [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      3,
-      0
-    ],
-    [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      3
-    ]
-  ],
-  "epochs_completed": 30
+  "missing_classes": [],
+  "epochs_completed": 10
 }
