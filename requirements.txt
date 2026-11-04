@@ -1,10 +1,11 @@
 # SignBridge AI — Core Requirements
-# Verified and tested on Python 3.11.9 (Windows)
+# Verified and tested on Python 3.11.9 (Windows) & Linux (Vercel/Production)
 
 gradio==4.44.1
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
-opencv-python==4.10.0.84
+opencv-python==4.10.0.84; sys_platform == 'win32'
+opencv-python-headless==4.10.0.84; sys_platform != 'win32'
 mediapipe==0.10.18
 numpy==1.26.4
 pandas==2.2.3
@@ -18,9 +19,9 @@ requests==2.32.3
 huggingface-hub==0.25.2
 click==8.1.8
 
-# Machine Learning (TensorFlow CPU for Windows native compatibility)
+# Machine Learning (TensorFlow CPU for Windows native compatibility & Linux)
 tensorflow==2.16.1
-tensorflow-intel==2.16.1
+tensorflow-intel==2.16.1; sys_platform == 'win32'
 
 # Speech Synthesis (TTS)
 edge-tts==7.3.1
@@ -29,4 +30,3 @@ gTTS==2.5.4
 # Speech Recognition (STT)
 faster-whisper==1.2.1
 ctranslate2==4.8.5
-

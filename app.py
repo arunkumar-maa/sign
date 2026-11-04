@@ -22,6 +22,9 @@ import gradio as gr
 import config as cfg
 from backend.main import app as fastapi_app
 
+# Top-level ASGI FastAPI instance for deployment platforms (e.g. Vercel) and ASGI servers
+app = fastapi_app
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
