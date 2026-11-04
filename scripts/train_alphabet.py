@@ -2,7 +2,7 @@
 SignBridge AI — Dedicated Alphabet / Fingerspelling Model Training Script (A–Z).
 Trains a Bidirectional LSTM classifier for Indian Sign Language English Alphabet (26 classes).
 Strictly uses backend/vision/feature_schema.py (v2.0.0, 282 dimensions, 30 frames).
-Partitions train/val/test splits strictly by signer ID for genuine out-of-sample evaluation.
+Enforces genuine signer-independent train, validation, and test splits without random clip fallbacks.
 """
 
 import argparse
@@ -115,6 +115,14 @@ def main():
         logger.info("Run `python scripts/import_fingerspelling.py` to download and extract dataset.")
         return
 
+    # Check unique signers: genuine signer-independent training requires >= 3 distinct signer IDs
+    unique_signers = sorted(list(set(signers)))
+    if len(unique_signers) < 3:
+        raise ValueError(
+            f"Insufficient signer IDs: genuine signer-independent training requires at least 3 distinct signer IDs "
+            f"(found {len(unique_signers)}: {unique_signers}). Random train_test_split fallback is prohibited."
+        )
+
     # Check class coverage
     present_classes = sorted(set(y.tolist()))
     missing = [c for i, c in enumerate(ALPHABET_CLASSES) if i not in present_classes]
@@ -122,21 +130,37 @@ def main():
     if missing:
         logger.warning("Missing classes (%d): %s", len(missing), missing)
 
-    # Signer-independent split
+    # Genuine 3-way signer-independent partitioning (Train, Validation, Test)
     signers_arr = np.asarray(signers)
-    test_signer = "signer_02" if "signer_02" in signers_arr else signers_arr[-1]
+    test_signer = "signer_02" if "signer_02" in unique_signers else unique_signers[-1]
+    val_signer = "signer_01" if "signer_01" in unique_signers else [s for s in unique_signers if s != test_signer][-1]
+    train_signers = [s for s in unique_signers if s != test_signer and s != val_signer]
+
+    train_mask = np.isin(signers_arr, train_signers)
+    val_mask = (signers_arr == val_signer)
     test_mask = (signers_arr == test_signer)
-    train_mask = ~test_mask
 
-    if np.sum(test_mask) == 0 or np.sum(train_mask) == 0:
-        # Fallback to random stratified split
-        from sklearn.model_selection import train_test_split
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-    else:
-        X_train, y_train = X[train_mask], y[train_mask]
-        X_test, y_test = X[test_mask], y[test_mask]
+    if np.sum(train_mask) == 0:
+        raise ValueError(f"No training samples for signers: {train_signers}")
+    if np.sum(val_mask) == 0:
+        raise ValueError(f"No validation samples for signer: {val_signer}")
+    if np.sum(test_mask) == 0:
+        raise ValueError(f"No test samples for signer: {test_signer}")
 
-    logger.info("Train set: %d samples, Test set (%s): %d samples", len(X_train), test_signer, len(X_test))
+    X_train, y_train = X[train_mask], y[train_mask]
+    X_val, y_val = X[val_mask], y[val_mask]
+    X_test, y_test = X[test_mask], y[test_mask]
+
+    # Inspect per-class test set representation
+    per_class_test_samples: Dict[str, int] = {}
+    for c in range(len(ALPHABET_CLASSES)):
+        cnt = int(np.sum((y == c) & test_mask))
+        per_class_test_samples[ID_TO_LABEL[c]] = cnt
+        if cnt == 0:
+            logger.warning("Alphabet class %s has 0 test samples on held-out signer %s!", ID_TO_LABEL[c], test_signer)
+
+    logger.info("Signer-Independent Split: Train Signers %s (%d samples), Val Signer %s (%d samples), Test Signer %s (%d samples)",
+                train_signers, len(X_train), val_signer, len(X_val), test_signer, len(X_test))
 
     model = build_alphabet_model(num_classes=len(ALPHABET_CLASSES))
     verify_model_compatibility(model, expected_dim=FEATURE_DIM, expected_seq_len=SEQUENCE_LENGTH)
@@ -144,15 +168,15 @@ def main():
     logger.info("Beginning training for %d epochs...", args.epochs)
     model.fit(
         X_train, y_train,
-        validation_data=(X_test, y_test),
+        validation_data=(X_val, y_val),
         epochs=args.epochs,
         batch_size=args.batch_size,
         verbose=1,
     )
 
-    # Evaluate
+    # Evaluate on held-out test signer
     test_loss, test_acc = model.evaluate(X_test, y_test, verbose=0)
-    logger.info("Test Accuracy on %s: %.2f%% (Loss: %.4f)", test_signer, test_acc * 100.0, test_loss)
+    logger.info("Signer-Independent Test Accuracy on %s: %.2f%% (Loss: %.4f)", test_signer, test_acc * 100.0, test_loss)
 
     # Save models
     for out_p in [OUT_MODEL_PATH, CAT_MODEL_PATH]:
@@ -184,11 +208,21 @@ def main():
     EVAL_REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(EVAL_REPORT_PATH, "w", encoding="utf-8") as f:
         json.dump({
+            "split_type": "signer_independent",
+            "signer_split": {
+                "train_signers": train_signers,
+                "val_signers": [val_signer],
+                "test_signers": [test_signer],
+            },
+            "sample_counts": {
+                "total": int(len(X)),
+                "train": int(len(X_train)),
+                "val": int(len(X_val)),
+                "test": int(len(X_test)),
+            },
+            "per_class_test_samples": per_class_test_samples,
             "test_accuracy": float(test_acc),
             "test_loss": float(test_loss),
-            "test_samples": int(len(X_test)),
-            "train_samples": int(len(X_train)),
-            "test_signer": str(test_signer),
             "present_classes": [ID_TO_LABEL[i] for i in present_classes],
             "missing_classes": missing,
         }, f, indent=2)
@@ -197,4 +231,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

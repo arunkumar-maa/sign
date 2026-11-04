@@ -231,14 +231,22 @@ def test_13_dataset_class_validation():
     with pytest.raises(ValueError):
         validate_label("alphabet", "1")
 
-    # Valid numbers
-    assert validate_label("number", "5") == ("number", "5")
-    assert validate_label("number", "TWO") == ("number", "TWO")
+    # Valid numbers (all 10 classes)
+    for i in range(10):
+        assert validate_label("number", str(i)) == ("number", str(i))
+    assert validate_label("number", "TWO") == ("number", "2")
+    with pytest.raises(ValueError):
+        validate_label("number", "10")
     with pytest.raises(ValueError):
         validate_label("number", "INVALID")
 
 
 # ── Area 14: Model loading ───────────────────────────────────────────────────
+@pytest.mark.skipif(
+    not (PROJECT_ROOT / "models" / "isl_fingerspelling_model.keras").exists() or
+    not (PROJECT_ROOT / "models" / "isl_number_model.keras").exists(),
+    reason="Real model weights are gitignored; run setup_assets.py or training scripts first",
+)
 def test_14_model_loading():
     fs_rec = ISLFingerspellingRecognizer()
     assert fs_rec.is_loaded is True

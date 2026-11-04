@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-04  
 **Author:** SignBridge AI Engineering Team  
-**Git Branch:** `repair/alphabet-numbers-refactor`  
+**Git Branch:** `main`  
 **Repository:** https://github.com/arunkumar-maa/sign.git  
 **Target Focus:** Exclusive Real-Time Recognition of ISL English Alphabet (A–Z, 26 classes) & Numbers (0–9, 10 classes) with Character-by-Character Text Generation.
 
@@ -76,22 +76,48 @@ The previous word-based sentence assembler is replaced with a **Character Text B
 - **Backspace**: Removes the trailing character.
 - **Clear Text**: Resets the text buffer.
 - **Speak Text**: Triggers local Python Text-to-Speech (Edge-TTS or gTTS fallback).
-- **Auto-Add Guard**: Requires hand stability for 5+ frames ($>0.65$ confidence) followed by a neutral-release gap before re-triggering.
+- **Auto-Add Guard**: Requires hand stability for 6+ frames ($>0.65$ confidence) followed by a neutral-release gap before re-triggering.
 
 ---
 
 ## 4. Verification and Implementation Checklist
 
-- [x] Create separate repair branch `repair/alphabet-numbers-refactor`.
+- [x] Create separate repair branch `repair/alphabet-numbers-refactor` and merge into `main`.
 - [x] Perform full repository inventory and audit report.
-- [ ] Implement `backend/vision/feature_schema.py` (v2.0.0, 282-dim, validation, compatibility checks).
-- [ ] Refactor Alphabet Recognizer (`backend/recognition/isl_fingerspelling_recognizer.py`).
-- [ ] Refactor Number Recognizer (`backend/recognition/isl_number_recognizer.py`).
-- [ ] Refactor Live Pipeline (`backend/vision/live_pipeline.py`) with Character Text Builder.
-- [ ] Overhaul Dataset Collection UI (`isl_data_collection/ui.py`).
-- [ ] Create dedicated training scripts: `scripts/train_alphabet.py` and `scripts/train_numbers.py`.
-- [ ] Refactor Live Webcam UI (`frontend/translator_ui.py`) with per-session state isolation.
-- [ ] Clean backend initialization in `app.py` and `backend/main.py`.
-- [ ] Run complete automated test suite across all 15 audit areas.
-- [ ] Update `README.md` with complete architecture, instructions, and Windows PowerShell commands.
+- [x] Implement `backend/vision/feature_schema.py` (v2.0.0, 282-dim, validation, compatibility checks).
+- [x] Refactor Alphabet Recognizer (`backend/recognition/isl_fingerspelling_recognizer.py`).
+- [x] Refactor Number Recognizer (`backend/recognition/isl_number_recognizer.py`).
+- [x] Refactor Live Pipeline (`backend/vision/live_pipeline.py`) with Character Text Builder.
+- [x] Overhaul Dataset Collection UI (`isl_data_collection/ui.py`).
+- [x] Create dedicated training scripts: `scripts/train_alphabet.py` and `scripts/train_numbers.py`.
+- [x] Refactor Live Webcam UI (`frontend/translator_ui.py`) with per-session state isolation.
+- [x] Clean backend initialization in `app.py` and `backend/main.py`.
+- [x] Run complete automated test suite across all 15 audit areas.
+- [x] Update `README.md` with complete architecture, instructions, and Windows PowerShell commands.
 
+---
+
+## 5. Final GitHub Audit Corrections & Decoupling
+
+Following the core refactor, final GitHub audit corrections were implemented to eliminate remaining inconsistencies:
+
+1. **Complete Removal of Word Recognition from Active Pipeline**:
+   - `ISLWordRecognizer` and `SentenceBuilder` are completely removed from the import and execution path of `backend/vision/live_pipeline.py`.
+   - The active recognition modes are strictly `Alphabet (A–Z)` and `Numbers (0–9)`.
+   - The UI radio selector exposes exclusively `["Alphabet (A–Z)", "Numbers (0–9)"]`.
+   - All historical word-recognition files remain unimported and archived in `backend/recognition/`.
+2. **Strict Signer-Independent Training Splits**:
+   - Removed all random `train_test_split` fallbacks in `scripts/train_alphabet.py` and `scripts/train_numbers.py`.
+   - Enforced a hard minimum of 3 unique signer IDs for training; scripts fail immediately with an informative error if signer diversity is insufficient.
+   - Evaluated models record train signers, validation signers, test signers, and per-class test sample counts in `models/*/evaluation.json`.
+3. **Number Label Normalization & Validation**:
+   - Number model output is locked to exactly 10 classes (`0` to `9`).
+   - Normalization of source labels like `TWO` to `2` occurs strictly during dataset validation/import via `isl_data_collection/storage.py`.
+   - Out-of-range inputs (e.g. `10` or invalid strings) are rejected with `ValueError`.
+4. **Model Asset Availability & Git Policy**:
+   - Documented that `.keras` and `.task` files are excluded from git via `.gitignore` to keep the repository lightweight.
+   - Provided `scripts/setup_assets.py` for automated MediaPipe task download and schema validation.
+   - Live pipeline cleanly displays **"Model Not Available"** with instructions if assets are absent on disk.
+5. **Test Suite Modernization**:
+   - Unit tests use mocked models and schema validators.
+   - Integration tests requiring gitignored model files use `@pytest.mark.skipif` to pass cleanly on fresh checkouts.

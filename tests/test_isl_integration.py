@@ -181,6 +181,9 @@ def test_isl_word_model_loading():
 
 # 9. Prediction Confidence & Sequence Buffering
 def test_prediction_confidence_and_buffering():
+    import config as cfg
+    if not (cfg.MODELS_DIR / "isl_word_model.keras").exists():
+        pytest.skip("Historical word model gitignored and absent on disk")
     from backend.recognition.isl_word_recognizer import ISLWordRecognizer
     import config as cfg
 
@@ -214,6 +217,9 @@ def test_prediction_confidence_and_buffering():
 
 # 10. Unknown Sign Rejection
 def test_unknown_sign_rejection():
+    import config as cfg
+    if not (cfg.MODELS_DIR / "isl_word_model.keras").exists():
+        pytest.skip("Historical word model gitignored and absent on disk")
     from backend.recognition.isl_word_recognizer import ISLWordRecognizer
     import config as cfg
 

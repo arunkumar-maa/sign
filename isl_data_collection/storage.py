@@ -20,10 +20,12 @@ def clean_token(value: str, field_name: str, max_length: int = 48) -> str:
     return value
 
 
-VALID_NUMBER_LABELS = {
-    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-    "ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE", "TEN"
+WORD_TO_DIGIT = {
+    "ZERO": "0", "ONE": "1", "TWO": "2", "THREE": "3", "FOUR": "4",
+    "FIVE": "5", "SIX": "6", "SEVEN": "7", "EIGHT": "8", "NINE": "9",
 }
+VALID_NUMBER_CLASSES = [str(i) for i in range(10)]
+VALID_NUMBER_SET = set(VALID_NUMBER_CLASSES)
 
 
 def validate_label(category: str, label: str) -> tuple[str, str]:
@@ -33,8 +35,12 @@ def validate_label(category: str, label: str) -> tuple[str, str]:
     label = clean_token(label, "label")
     if category == "alphabet" and not re.fullmatch(r"[A-Z]", label):
         raise ValueError("Alphabet labels must be a single uppercase letter from A to Z.")
-    if category == "number" and label not in VALID_NUMBER_LABELS:
-        raise ValueError("Number labels must be 0–10 or ZERO–TEN.")
+    if category == "number":
+        # Normalise source labels such as TWO to 2 during dataset collection/import
+        normalized = WORD_TO_DIGIT.get(label, label)
+        if normalized not in VALID_NUMBER_SET:
+            raise ValueError(f"Number labels must be digits 0–9 (or ZERO–NINE), got: {label}")
+        label = normalized
     return category, label
 
 

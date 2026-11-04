@@ -126,17 +126,17 @@ def test_5_remove_both_hands(pipeline):
 # TEST 6: Untrained/unknown noise -> Unknown sign or insufficient confidence rejected
 def test_6_unknown_sign_rejection(pipeline):
     pipeline.start_recognition()
-    # Feed 30 frames of random noise
+    # Feed 30 frames of random noise (282-dim Feature Schema v2.0.0)
     for _ in range(30):
-        noise_vec = np.random.uniform(0.0, 1.0, 192).astype(np.float32)
+        noise_vec = np.random.uniform(0.0, 1.0, 282).astype(np.float32)
         pipeline.recognizer.add_frame(noise_vec, has_hands=True)
 
     pred = pipeline.recognizer.predict()
     # Should either be Unknown sign or confidence < threshold
-    if pred["word"] is not None:
-        assert pred["confidence"] >= pipeline.recognizer.confidence_threshold
+    if pred.get("word") is not None:
+        assert pred["confidence"] >= pipeline.recognizer.min_confidence
     else:
-        assert pred["status"] in ("Unknown sign", "Recognizing sign...", "Verifying sign stability...")
+        assert pred["status"].lower() in ("unknown sign", "unknown", "recognizing sign...", "verifying sign stability...")
 
 
 # TEST 7: Verified ISL sample evaluation

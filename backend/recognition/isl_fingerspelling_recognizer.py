@@ -126,7 +126,9 @@ class ISLFingerspellingRecognizer:
         if not self.is_loaded:
             return {
                 "letter": None,
+                "word": None,
                 "label": "Model Not Available",
+                "is_new_sign": False,
                 "confidence": 0.0,
                 "status": "Model Not Available",
                 "is_model_available": False,
@@ -135,7 +137,9 @@ class ISLFingerspellingRecognizer:
         if len(self._buffer) < 10:
             return {
                 "letter": None,
+                "word": None,
                 "label": "Collecting",
+                "is_new_sign": False,
                 "confidence": 0.0,
                 "status": f"Collecting letter frames ({len(self._buffer)}/{self.sequence_length})",
                 "is_model_available": True,
@@ -154,9 +158,11 @@ class ISLFingerspellingRecognizer:
             if top_conf < self.min_confidence:
                 return {
                     "letter": None,
+                    "word": None,
                     "label": "Unknown",
                     "confidence": top_conf,
                     "status": "Unknown Sign",
+                    "is_new_sign": False,
                     "is_model_available": True,
                 }
 
@@ -165,7 +171,9 @@ class ISLFingerspellingRecognizer:
 
             return {
                 "letter": pred_letter,
+                "word": pred_letter,
                 "label": pred_letter,
+                "is_new_sign": True,
                 "confidence": top_conf,
                 "status": f"Letter {pred_letter} ({top_conf:.1%})",
                 "is_model_available": True,
@@ -174,8 +182,10 @@ class ISLFingerspellingRecognizer:
             logger.error("ISLFingerspellingRecognizer: Inference error: %s", e)
             return {
                 "letter": None,
+                "word": None,
                 "label": "Error",
                 "confidence": 0.0,
                 "status": f"Inference Error: {e}",
+                "is_new_sign": False,
                 "is_model_available": True,
             }

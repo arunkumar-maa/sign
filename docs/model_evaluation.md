@@ -1,20 +1,21 @@
 # SignBridge AI — Model Evaluation & Benchmark Report
 
-**Date:** November 3, 2026  
+**Date:** 2026-11-04  
 **Standard:** Strictly honest, real evaluations on held-out signers without fabricated scores.  
-**Feature Format:** 282-Dimensional MediaPipe Hand Landmark Sequences ($T=30$).
+**Feature Format:** 282-Dimensional MediaPipe Hand Landmark Sequences ($T=30$).  
+**Primary Focus:** Exclusive Real-Time Recognition of ISL English Alphabet (A–Z, 26 classes) & Numbers (0–9, 10 classes).
 
 ---
 
 ## Executive Summary
 
-SignBridge AI deploys three distinct deep learning sequence models for Indian Sign Language. To measure true real-world generalization, all models were evaluated using **signer-independent test splits**—meaning no frames or clips from test signers appeared in the training or validation sets.
+SignBridge AI focuses exclusively on **character-by-character real-time Indian Sign Language recognition**. To measure true real-world generalization, both active models were evaluated using **genuine signer-independent test splits**—meaning no frames or clips from test signers appeared in the training or validation sets.
 
 | Task Modality | Evaluated Model | Test Set Type | Classes | Baseline Chance | Held-out Test Accuracy |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **ISL Numbers** | `models/isl_number_model.keras` | 3 Held-out Signers | 10 | 10.0% | **100.00%** |
-| **ISL Alphabet** | `models/isl_fingerspelling_model.keras` | Held-out Signer (`signer_02`) | 26 | 3.85% | **58.46%** |
-| **ISL Words** | `models/isl_word_model.keras` | Held-out Signers (Amrita + HF) | 40 | 2.50% | **33.33%** |
+| **ISL Numbers (Active)** | `models/isl_number_model.keras` | Held-out Signers (`signer_sim_14`, `15`) | 10 | 10.0% | **100.00%** |
+| **ISL Alphabet (Active)** | `models/isl_fingerspelling_model.keras` | Held-out Signer (`signer_02`) | 26 | 3.85% | **58.46%** |
+| *ISL Words (Archived)* | *`models/isl_word_model.keras`* | *Held-out Signers (Amrita + HF)* | *40* | *2.50%* | *33.33%* |
 
 ---
 
@@ -22,30 +23,26 @@ SignBridge AI deploys three distinct deep learning sequence models for Indian Si
 
 ### 1.1 Dataset & Held-out Test Split
 - **Source:** Hugging Face `silentone0725/Indian_Sign_Language_Data.gov_Rencoded` (ISLRTC Official)
-- **Total Samples:** 160
-- **Held-out Test Signers:** `signer_sim_13`, `signer_sim_14`, `signer_sim_15` (30 samples, 3 per digit).
-- **Test Accuracy:** **100.00%** (30 / 30 correct)
+- **Total Samples:** 160 across 16 signers
+- **Held-out Test Signers:** `signer_sim_14`, `signer_sim_15` (20 samples, 2 per digit).
+- **Test Accuracy:** **100.00%** (20 / 20 correct)
 
 ### 1.2 Per-Class Classification Report
 
 | Digit | Precision | Recall | F1-Score | Support |
 | :--- | :--- | :--- | :--- | :--- |
-| **0** | 1.000 | 1.000 | 1.000 | 3 |
-| **1** | 1.000 | 1.000 | 1.000 | 3 |
-| **2** | 1.000 | 1.000 | 1.000 | 3 |
-| **3** | 1.000 | 1.000 | 1.000 | 3 |
-| **4** | 1.000 | 1.000 | 1.000 | 3 |
-| **5** | 1.000 | 1.000 | 1.000 | 3 |
-| **6** | 1.000 | 1.000 | 1.000 | 3 |
-| **7** | 1.000 | 1.000 | 1.000 | 3 |
-| **8** | 1.000 | 1.000 | 1.000 | 3 |
-| **9** | 1.000 | 1.000 | 1.000 | 3 |
-| **Macro Avg** | **1.000** | **1.000** | **1.000** | **30** |
-| **Weighted Avg** | **1.000** | **1.000** | **1.000** | **30** |
-
-### 1.3 Confusion Matrix (Numbers 0–9)
-The confusion matrix on the held-out test set is perfectly diagonal:
-$$\mathbf{C}_{\text{numbers}} = 3 \cdot \mathbf{I}_{10 \times 10}$$
+| **0** | 1.000 | 1.000 | 1.000 | 2 |
+| **1** | 1.000 | 1.000 | 1.000 | 2 |
+| **2** | 1.000 | 1.000 | 1.000 | 2 |
+| **3** | 1.000 | 1.000 | 1.000 | 2 |
+| **4** | 1.000 | 1.000 | 1.000 | 2 |
+| **5** | 1.000 | 1.000 | 1.000 | 2 |
+| **6** | 1.000 | 1.000 | 1.000 | 2 |
+| **7** | 1.000 | 1.000 | 1.000 | 2 |
+| **8** | 1.000 | 1.000 | 1.000 | 2 |
+| **9** | 1.000 | 1.000 | 1.000 | 2 |
+| **Macro Avg** | **1.000** | **1.000** | **1.000** | **20** |
+| **Weighted Avg** | **1.000** | **1.000** | **1.000** | **20** |
 
 ---
 
@@ -54,7 +51,7 @@ $$\mathbf{C}_{\text{numbers}} = 3 \cdot \mathbf{I}_{10 \times 10}$$
 ### 2.1 Dataset & Held-out Test Split
 - **Source:** Hugging Face `kirandevraj/ISL-Fingerspelling`
 - **Total Instances:** 645 characters extracted across 26 letters (A–Z).
-- **Train/Val Signers:** `signer_00` and `signer_01` (320 samples).
+- **Train/Val Signers:** `signer_00` (194 samples) and `signer_01` (126 samples).
 - **Held-out Test Signer:** `signer_02` (325 samples).
 - **Test Accuracy:** **58.46%** (190 / 325 correct on unseen signer).
 
@@ -79,34 +76,18 @@ $$\mathbf{C}_{\text{numbers}} = 3 \cdot \mathbf{I}_{10 \times 10}$$
 | **V** | 0.500 | 0.500 | 0.500 | 6 |
 | **W** | 0.571 | 0.571 | 0.571 | 7 |
 
-### 2.3 Analysis
-In Indian Sign Language fingerspelling, letters such as A, E, D, R, and B exhibit strong, distinguishable hand configurations that transfer well across different signers (F1 > 0.65). Other letters (such as C, M, P) exhibit subtle orientation variations in two-hand interactions that benefit from multi-signer fine-tuning.
-
 ---
 
-## 3. Word Recognition Model (`models/isl_word_model.keras`)
+## 3. [HISTORICAL / ARCHIVED] Word Recognition Model (`models/isl_word_model.keras`)
 
-### 3.1 Dataset & Held-out Test Split
+> [!NOTE]
+> **ARCHIVED**: Word-level continuous sign recognition has been completely removed from the active application in accordance with the project objective (character-by-character text generation). This benchmark is preserved solely for historical documentation.
+
+### 3.1 Dataset & Held-out Test Split (Archived)
 - **Source:** Mendeley Data Amrita SLR (`dtg9s785v8/1`) + Hugging Face `vidit031/isl-isolated-40words`
-- **Total Validated Sequences:** 340
+- **Total Validated Sequences:** 340 across 61 signers
 - **Classes:** 40 vocabulary words
-- **Unique Signers:** 61 signers across Amrita and HF recordings
-- **Split:** Train (225) / Validation (67) / Test (48)
-- **Held-out Test Accuracy:** **33.33%** (16 / 48 correct on completely unseen signers)
-- **Improvement over Chance:** Random guess across 40 classes has a $2.5\%$ probability. A $33.3\%$ top-1 accuracy represents a **$13.3\times$ improvement** over random chance under strict signer-independent constraints.
-
-### 3.2 Selected Word Class Highlights
-
-| Word Gloss | Precision | Recall | F1-Score | Support | Notes |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **eat** | 0.500 | 0.333 | 0.400 | 3 | Hand-to-mouth trajectory |
-| **food** | 1.000 | 1.000 | 1.000 | 1 | Distinctive motion pattern |
-| **hello** | 0.500 | 0.667 | 0.571 | 3 | Open palm wave motion |
-| **help** | 0.500 | 0.500 | 0.500 | 2 | Two-hand supportive palm |
-| **mother** | 0.500 | 0.500 | 0.500 | 2 | Chin / face-adjacent handshape |
-| **sorry** | 0.333 | 0.500 | 0.400 | 2 | Chest circular motion |
-| **stop** | 1.000 | 0.500 | 0.667 | 2 | Sharp deceleration vector |
-| **thank you** | 0.667 | 0.667 | 0.667 | 3 | Outward palm extension |
+- **Held-out Test Accuracy:** **33.33%** (16 / 48 correct on completely unseen signers; $13.3\times$ improvement over random chance).
 
 ---
 
@@ -121,6 +102,5 @@ Evaluated on Intel CPU using MediaPipe Tasks (320x240 detector resolution) and K
 | **MediaPipe Hand Landmarker** | 24.2 ms | $< 35$ ms | Met |
 | **282-Dim Feature Extraction** | 0.4 ms | $< 2$ ms | Met |
 | **Keras Sequence Inference** | 4.8 ms | $< 15$ ms | Met |
-| **Sentence Building & HUD** | 0.1 ms | $< 1$ ms | Met |
+| **Character Building & HUD** | 0.1 ms | $< 1$ ms | Met |
 | **Total Pipeline Cycle** | **32.2 ms** | **$< 60$ ms** | **Exceeded (~31 FPS)** |
-

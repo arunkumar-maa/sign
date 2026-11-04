@@ -119,6 +119,8 @@ def test_landmark_extraction_dimensions():
 # 5. Static Model Inference & Unavailable Message
 def test_static_model_inference():
     import config as cfg
+    if not cfg.STATIC_MODEL_PATH.exists():
+        pytest.skip("Static model file gitignored and absent on disk")
     from backend.recognition.static_recognizer import StaticRecognizer
 
     sr = StaticRecognizer(
@@ -139,6 +141,8 @@ def test_static_model_inference():
 # 6. Dynamic Model Inference & 30-Frame Sequence
 def test_dynamic_model_inference():
     import config as cfg
+    if not cfg.DYNAMIC_MODEL_PATH.exists():
+        pytest.skip("Dynamic model file gitignored and absent on disk")
     from backend.recognition.dynamic_recognizer import DynamicRecognizer
 
     dr = DynamicRecognizer(

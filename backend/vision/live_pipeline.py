@@ -1,19 +1,20 @@
 """
-SignBridge AI — Phase 5, 7, 8: Unified Live Camera & Multi-Mode ISL Recognition Pipeline.
+SignBridge AI — Phase 7, 8, 9, 10: Unified Live Camera & Multi-Mode ISL Recognition Pipeline.
 Centralized, thread-safe production pipeline for real-time camera tracking and ISL recognition.
+Focuses exclusively on English Alphabet Fingerspelling (A–Z) and Numbers (0–9).
 
-Key Enhancements:
-1. Three Distinct Recognition Modes:
-   - "Finger Count": Outputs 0, 1, 2, 3, 4, 5 with confidence, no word predictions.
-   - "ISL Numbers": Outputs 0 through 9 with ISL syntactic verification.
-   - "ISL Words": 40 ISL vocabulary signs with dynamic motion gating and unknown sign rejection.
+Key Features:
+1. Two Core Recognition Modes:
+   - "Alphabet (A–Z)": 26 ISL fingerspelling classes evaluated on 30-frame sequence window.
+   - "Numbers (0–9)": 10 ISL number classes with syntactic verification.
 2. Latency Optimization:
    - Resizes frame to 320x240 for MediaPipe Tasks HandLandmarker while drawing on full-resolution frame.
    - Stage-by-stage profiling via PerformanceMonitor (Ingest, Preprocessing, Detection, Extraction, Inference, Total, FPS).
 3. Single Camera Stream:
    - Direct high-contrast rendering of green landmark dots (r=5) and blue skeleton connections.
-4. Strict Sentence Builder:
-   - Manual confirmation by default; auto-add requires 15 stable frames (>0.85 conf) and neutral-release gate.
+4. Character Text Builder:
+   - Character-by-character assembly into readable strings (e.g. "HELLO123").
+   - Auto-add requires stability for 6 frames + mandatory neutral release gate.
 """
 
 import logging
@@ -31,33 +32,55 @@ from backend.vision.feature_schema import (
     validate_features,
 )
 from backend.vision.hand_pose_features import (
-    extract_two_hand_features,
     classify_handshape_name,
-    TWO_HAND_FEATURE_DIM,
 )
-from backend.recognition.finger_counter import FingerCounter, FingerCountResult
-from backend.recognition.isl_number_recognizer import ISLNumberRecognizer, ISLNumberResult
+from backend.recognition.finger_counter import FingerCounter
+from backend.recognition.isl_number_recognizer import ISLNumberRecognizer
 from backend.recognition.isl_fingerspelling_recognizer import ISLFingerspellingRecognizer
-from backend.recognition.isl_word_recognizer import ISLWordRecognizer
-from backend.recognition.sentence_builder import SentenceBuilder
 from backend.recognition.character_builder import CharacterTextBuilder
 from backend.vision.performance_monitor import PerformanceMonitor, LatencyProfile
 
 logger = logging.getLogger(__name__)
 
 
+class _DummyWordRecognizer:
+    """Historical placeholder shim to ensure backward compatibility without importing ISLWordRecognizer."""
+    def __init__(self):
+        self._buffer: List[np.ndarray] = []
+        self.is_loaded: bool = False
+        self.confidence_threshold: float = 0.5
+
+    @property
+    def buffer_count(self) -> int:
+        return len(self._buffer)
+
+    def reset_buffer(self) -> None:
+        self._buffer.clear()
+
+    def add_frame(self, *args, **kwargs) -> None:
+        pass
+
+    def predict(self) -> Dict[str, Any]:
+        return {
+            "status": "Model Not Available",
+            "word": None,
+            "confidence": 0.0,
+            "is_model_available": False,
+        }
+
+
 class LivePipeline:
     """
     Centralized, thread-safe production pipeline for real-time hand camera tracking,
-    finger counting, ISL number recognition, and 40-word ISL sentence building.
+    ISL Alphabet (A–Z) and ISL Number (0–9) recognition, and Character Text Building.
     """
 
     def __init__(
         self,
-        mode: str = "ISL Words",
+        mode: str = "Alphabet (A–Z)",
         sequence_length: int = 30,
-        repeat_cooldown: float = 1.5,
-        confidence_threshold: float = 0.38,
+        repeat_cooldown: float = 1.0,
+        confidence_threshold: float = 0.45,
     ):
         self.mode: str = mode
         self.confidence_threshold = confidence_threshold
@@ -70,26 +93,19 @@ class LivePipeline:
         self.number_recognizer = ISLNumberRecognizer()
         self.fingerspelling_recognizer = ISLFingerspellingRecognizer(
             sequence_length=sequence_length,
-            min_confidence=0.45,
-        )
-        self.word_recognizer = ISLWordRecognizer(
-            sequence_length=sequence_length,
-            min_confidence=0.52,
-            min_margin=0.15,
-            min_motion_energy=0.012,
-            cooldown_seconds=repeat_cooldown,
-        )
-        self.recognizer = self.word_recognizer
-        self.sentence_builder = SentenceBuilder(
-            repeat_cooldown_seconds=repeat_cooldown,
-            required_stable_frames=15,
-            min_auto_confidence=0.85,
+            min_confidence=confidence_threshold,
         )
         self.character_builder = CharacterTextBuilder(
             required_stable_frames=6,
             min_auto_confidence=0.65,
             repeat_cooldown_seconds=repeat_cooldown,
         )
+
+        # Backward compatibility aliases for existing caller inspections
+        self.recognizer = self.fingerspelling_recognizer
+        self.sentence_builder = self.character_builder
+        self.word_recognizer = _DummyWordRecognizer()
+
         self.perf_monitor = PerformanceMonitor()
 
         self.is_running: bool = True
@@ -99,20 +115,24 @@ class LivePipeline:
         self._frame_counter: int = 0
 
     def set_mode(self, new_mode: str):
-        """Switch active recognition mode ('Finger Count', 'ISL Numbers', 'ISL Alphabet/Fingerspelling', 'ISL Words')."""
+        """Switch active recognition mode ('Alphabet (A–Z)', 'Numbers (0–9)')."""
         clean = new_mode.strip()
         self.mode = clean
-        self.word_recognizer.reset_buffer()
         self.fingerspelling_recognizer.reset_buffer()
         self.number_recognizer.reset_buffer()
+        self.word_recognizer.reset_buffer()
+        if "number" in clean.lower():
+            self.recognizer = self.number_recognizer
+        else:
+            self.recognizer = self.fingerspelling_recognizer
         logger.info("LivePipeline: Mode set to '%s'", self.mode)
 
     def start_recognition(self) -> str:
         """Enable active ISL sequence classification."""
         self.is_running = True
-        self.word_recognizer.reset_buffer()
         self.fingerspelling_recognizer.reset_buffer()
         self.number_recognizer.reset_buffer()
+        self.word_recognizer.reset_buffer()
         logger.info("LivePipeline: Recognition active (Mode: %s)", self.mode)
         return f"▶ Recognition active (Mode: {self.mode})"
 
@@ -123,12 +143,12 @@ class LivePipeline:
         return "⏸ Recognition paused (Hand tracking active)"
 
     def stop_and_clear(self) -> Tuple[str, str, str, str, str]:
-        """Stop recognition, clear sentence builder and sequence buffer."""
+        """Stop recognition, clear character text builder and sequence buffer."""
         self.is_running = False
-        self.word_recognizer.reset_buffer()
         self.fingerspelling_recognizer.reset_buffer()
         self.number_recognizer.reset_buffer()
-        self.sentence_builder.clear()
+        self.word_recognizer.reset_buffer()
+        self.character_builder.clear()
         self._last_pred_sign = "—"
         self._last_conf_str = "—"
         self._last_finger_count_str = "—"
@@ -143,44 +163,39 @@ class LivePipeline:
                 if clean.startswith(prefix):
                     clean = clean[len(prefix):].split()[0]
             self.character_builder.add_character(clean)
-            self.sentence_builder.accept_current_sign(self._last_pred_sign, 1.0)
-        curr = self.character_builder.text or self.sentence_builder.current_sentence
-        return curr, " → ".join(self.sentence_builder.gloss_sequence)
+        curr = self.character_builder.text
+        return curr, " → ".join(self.character_builder.gloss_sequence)
 
     def undo_last_sign(self) -> Tuple[str, str]:
-        """Remove the most recently confirmed sign from the sentence."""
-        removed = self.sentence_builder.undo()
-        logger.info("LivePipeline: Undone sign: %s", removed)
-        return self.sentence_builder.current_sentence, " → ".join(self.sentence_builder.gloss_sequence)
+        """Remove the most recently confirmed character from the text."""
+        self.character_builder.backspace()
+        return self.character_builder.text, " → ".join(self.character_builder.gloss_sequence)
 
     def clear_sentence(self) -> Tuple[str, str]:
-        """Clear sentence."""
-        self.sentence_builder.clear()
+        """Clear text."""
+        self.character_builder.clear()
         return "", ""
 
     def confirm_sentence(self, custom_text: Optional[str] = None) -> str:
-        """Lock in confirmed sentence."""
+        """Lock in confirmed text."""
         if custom_text and custom_text.strip():
-            self.sentence_builder.set_user_text(custom_text.strip())
-        return self.sentence_builder.confirmed_text
+            self.character_builder.set_text(custom_text.strip())
+        return self.character_builder.confirmed_text
 
     def add_character(self, char: Optional[str]) -> str:
         """Append a recognized character to the text buffer."""
         if char:
             self.character_builder.add_character(char)
-            self.sentence_builder.add_word(char)
-        return self.character_builder.text or self.sentence_builder.current_sentence
+        return self.character_builder.text
 
     def backspace(self) -> str:
         """Remove trailing character from text buffer."""
         self.character_builder.backspace()
-        self.sentence_builder.undo()
         return self.character_builder.text
 
     def clear_text(self) -> str:
-        """Clear the character and sentence text buffers."""
+        """Clear the character text buffer."""
         self.character_builder.clear()
-        self.sentence_builder.clear()
         return ""
 
     def _extract_282_features(self, hand_result: HandLandmarkResult) -> np.ndarray:
@@ -203,8 +218,8 @@ class LivePipeline:
         1. Downsample for MediaPipe detection (320x240) while drawing on full frame.
         2. MediaPipe Hand Landmark detection.
         3. Draw green dots and blue connections directly on frame.
-        4. Mode-based classification (Finger Count, ISL Numbers, or ISL Words).
-        5. Sentence builder auto-add stabilization and transition gating.
+        4. Mode-based classification (ISL Numbers or ISL Alphabet).
+        5. Character builder auto-add stabilization and neutral-release gating.
         6. Performance profile tracking.
         """
         t_start = time.perf_counter()
@@ -213,7 +228,7 @@ class LivePipeline:
         if mode and mode != self.mode:
             self.set_mode(mode)
 
-        self.sentence_builder.auto_add_enabled = auto_add
+        self.character_builder.auto_add_enabled = auto_add
 
         # Handle missing or empty frame
         if frame is None or getattr(frame, "size", 0) == 0:
@@ -223,8 +238,8 @@ class LivePipeline:
                 "current_sign": "—",
                 "confidence": "—",
                 "finger_count": "—",
-                "sentence": self.sentence_builder.current_sentence or current_sentence or "",
-                "gloss_sequence": " → ".join(self.sentence_builder.gloss_sequence),
+                "sentence": self.character_builder.text or current_sentence or "",
+                "gloss_sequence": " → ".join(self.character_builder.gloss_sequence),
                 "latency": "0 ms",
                 "hud_status": "Waiting for camera",
             }
@@ -274,10 +289,9 @@ class LivePipeline:
                 f"• Camera FPS: {hand_result.fps:.1f}"
             )
             hud_status = "Recognition paused (No hand detected)" if not self.is_running else "No hand detected"
-            self.word_recognizer.reset_buffer()
             self.fingerspelling_recognizer.reset_buffer()
             self.number_recognizer.reset_buffer()
-            self.sentence_builder.process_frame_auto_add(None, 0.0, hand_present=False)
+            self.character_builder.process_auto_frame(None, 0.0, hand_detected=False)
 
         else:
             # Determine primary hand landmarks
@@ -314,46 +328,8 @@ class LivePipeline:
             feat_282 = self._extract_282_features(hand_result)
             t_extract_end = time.perf_counter()
 
-            # MODE 1: ISL Alphabet / Fingerspelling Mode (A-Z)
-            if "alphabet" in self.mode.lower() or "spelling" in self.mode.lower():
-                t_inference_start = time.perf_counter()
-                if not self.fingerspelling_recognizer.is_loaded:
-                    pred_sign = "Model Not Available"
-                    conf_str = "—"
-                    hud_status = "Fingerspelling model not available (models/isl_fingerspelling_model.keras missing)"
-                elif not self.is_running:
-                    hud_status = "Recognition paused (Click Start Recognition)"
-                    pred_sign = "—"
-                    conf_str = "—"
-                else:
-                    self.fingerspelling_recognizer.add_frame(feat_282, has_hands=True)
-                    alph_pred = self.fingerspelling_recognizer.predict()
-                    rec_let = alph_pred.get("letter")
-                    rec_conf = alph_pred.get("confidence", 0.0)
-                    status_text = alph_pred.get("status", "Recognizing...")
-
-                    if rec_let:
-                        pred_sign = f"Letter {rec_let}"
-                        conf_str = f"{rec_conf:.1%}"
-                        hud_status = f"Recognized: {pred_sign} ({conf_str})"
-                        candidate_for_auto_add = rec_let
-                        candidate_conf = rec_conf
-                    elif "Collecting" in status_text:
-                        pred_sign = "Collecting sign frames..."
-                        conf_str = f"{self.fingerspelling_recognizer.buffer_count}/30"
-                        hud_status = "Collecting alphabet frames..."
-                    elif "Model Not Available" in status_text:
-                        pred_sign = "Model Not Available"
-                        conf_str = "—"
-                        hud_status = "Fingerspelling model not available"
-                    else:
-                        pred_sign = "Unknown Sign"
-                        conf_str = f"{rec_conf:.1%}" if rec_conf > 0.1 else "—"
-                        hud_status = status_text
-                t_inference_end = time.perf_counter()
-
-            # MODE 2: ISL Number Mode (0-9 digits)
-            elif "number" in self.mode.lower():
+            # MODE 1: ISL Number Mode (0-9 digits)
+            if "number" in self.mode.lower():
                 t_inference_start = time.perf_counter()
                 if not self.number_recognizer.is_loaded:
                     pred_sign = "Model Not Available"
@@ -390,77 +366,58 @@ class LivePipeline:
                         hud_status = status_text
                 t_inference_end = time.perf_counter()
 
-            # MODE 3: Finger Count Mode (0-5 diagnostic)
-            elif "finger" in self.mode.lower():
-                t_inference_start = time.perf_counter()
-                pred_sign = str(fc_res.count)
-                conf_str = f"{fc_res.confidence:.1%}"
-                hud_status = f"Finger Count: {fc_res.count} (Confidence: {conf_str})"
-                candidate_for_auto_add = pred_sign
-                candidate_conf = fc_res.confidence
-                t_inference_end = time.perf_counter()
-
-            # MODE 4: ISL Word Mode (40 vocabulary words with motion gating)
+            # MODE 2: ISL Alphabet / Fingerspelling Mode (A-Z) (Default)
             else:
                 t_inference_start = time.perf_counter()
-                if not self.word_recognizer.is_loaded:
+                if not self.fingerspelling_recognizer.is_loaded:
                     pred_sign = "Model Not Available"
                     conf_str = "—"
-                    hud_status = "Word model not available (models/isl_word_model.keras missing)"
+                    hud_status = "Fingerspelling model not available (models/isl_fingerspelling_model.keras missing)"
                 elif not self.is_running:
                     hud_status = "Recognition paused (Click Start Recognition)"
                     pred_sign = "—"
                     conf_str = "—"
                 else:
-                    self.word_recognizer.add_frame(feat_282, has_hands=True)
-                    pred = self.word_recognizer.predict()
+                    self.fingerspelling_recognizer.add_frame(feat_282, has_hands=True)
+                    alph_pred = self.fingerspelling_recognizer.predict()
+                    rec_let = alph_pred.get("letter") or alph_pred.get("word")
+                    rec_conf = alph_pred.get("confidence", 0.0)
+                    status_text = alph_pred.get("status", "Recognizing...")
+                    is_new_sign = alph_pred.get("is_new_sign", True)
 
-                    rec_word = pred.get("word")
-                    rec_conf = pred.get("confidence", 0.0)
-                    status_text = pred.get("status", "Recognizing...")
-
-                    if rec_word:
-                        pred_sign = rec_word.upper()
+                    if rec_let:
+                        pred_sign = f"Letter {rec_let}" if len(str(rec_let)) == 1 else str(rec_let).capitalize()
                         conf_str = f"{rec_conf:.1%}"
                         hud_status = f"Recognized: {pred_sign} ({conf_str})"
-                        candidate_for_auto_add = pred_sign
+                        candidate_for_auto_add = rec_let
                         candidate_conf = rec_conf
                     elif "Collecting" in status_text:
                         pred_sign = "Collecting sign frames..."
-                        conf_str = f"{self.word_recognizer.buffer_count}/30"
-                        hud_status = "Collecting dynamic sign motion..."
+                        conf_str = f"{self.fingerspelling_recognizer.buffer_count}/30"
+                        hud_status = "Collecting alphabet frames..."
                     elif "Model Not Available" in status_text:
                         pred_sign = "Model Not Available"
                         conf_str = "—"
-                        hud_status = "Word model not available"
-                    elif "Unknown" in status_text or "Stationary" in status_text:
+                        hud_status = "Fingerspelling model not available"
+                    else:
                         pred_sign = "Unknown Sign"
                         conf_str = f"{rec_conf:.1%}" if rec_conf > 0.1 else "—"
                         hud_status = status_text
-                    else:
-                        pred_sign = "—"
-                        conf_str = "—"
-                        hud_status = status_text
                 t_inference_end = time.perf_counter()
 
-        # ── Step 5: Sentence & Character Builder Update ──
+        # ── Step 5: Character Builder Auto-Add Stabilization ──
         t_sentence_start = time.perf_counter()
-        if auto_add:
-            if candidate_for_auto_add:
-                if "alphabet" in self.mode.lower() or "spelling" in self.mode.lower() or "number" in self.mode.lower():
+        if auto_add and candidate_for_auto_add:
+            is_new = locals().get("is_new_sign", True)
+            if is_new:
+                if len(str(candidate_for_auto_add)) > 1:
+                    self.character_builder.add_word(candidate_for_auto_add, candidate_conf)
+                else:
                     self.character_builder.auto_add_enabled = True
                     self.character_builder.process_auto_frame(
                         character_candidate=candidate_for_auto_add,
                         confidence=candidate_conf,
                         hand_detected=True,
-                    )
-                if "word" in self.mode.lower() and locals().get("pred", {}).get("is_new_sign", False):
-                    self.sentence_builder.add_word(candidate_for_auto_add, candidate_conf)
-                else:
-                    self.sentence_builder.process_frame_auto_add(
-                        candidate_sign=candidate_for_auto_add,
-                        confidence=candidate_conf,
-                        hand_present=True,
                     )
         t_sentence_end = time.perf_counter()
 
@@ -488,8 +445,8 @@ class LivePipeline:
         )
 
         latency_summary = profile.summary_string()
-        sentence_text = self.character_builder.text or self.sentence_builder.current_sentence or current_sentence or ""
-        gloss_seq = " → ".join(self.sentence_builder.gloss_sequence)
+        sentence_text = self.character_builder.text or current_sentence or ""
+        gloss_seq = " → ".join(self.character_builder.gloss_sequence)
 
         return {
             "annotated_frame": annotated_frame,

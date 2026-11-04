@@ -151,25 +151,22 @@ def on_add_character(session_pipeline: Optional[LivePipeline] = None) -> Tuple[s
             if clean.startswith(prefix):
                 clean = clean[len(prefix):].split()[0]
         pipeline.character_builder.add_character(clean)
-        pipeline.sentence_builder.add_word(clean)
-    curr_text = pipeline.character_builder.text or pipeline.sentence_builder.current_sentence
-    return curr_text, " → ".join(pipeline.sentence_builder.gloss_sequence), pipeline
+        curr_text = pipeline.character_builder.text
+    return curr_text, " → ".join(pipeline.character_builder.gloss_sequence), pipeline
 
 
 def on_backspace(session_pipeline: Optional[LivePipeline] = None) -> Tuple[str, str, Any]:
     """Remove the trailing character from the text buffer."""
     pipeline = _resolve_pipeline(session_pipeline)
     pipeline.character_builder.backspace()
-    pipeline.sentence_builder.undo()
     curr_text = pipeline.character_builder.text
-    return curr_text, " → ".join(pipeline.sentence_builder.gloss_sequence), pipeline
+    return curr_text, " → ".join(pipeline.character_builder.gloss_sequence), pipeline
 
 
 def on_clear_text(session_pipeline: Optional[LivePipeline] = None) -> Tuple[str, str, Any]:
     """Clear all accumulated characters."""
     pipeline = _resolve_pipeline(session_pipeline)
     pipeline.character_builder.clear()
-    pipeline.sentence_builder.clear()
     return "", "", pipeline
 
 
@@ -250,10 +247,10 @@ def build_translator_tab():
         # Recognition Mode Selector
         with gr.Row():
             mode_radio = gr.Radio(
-                choices=["Alphabet (A–Z)", "Numbers (0–9)", "Finger Count (Diagnostic)"],
+                choices=["Alphabet (A–Z)", "Numbers (0–9)"],
                 value="Alphabet (A–Z)",
                 label="🎯 Recognition Mode",
-                info="Alphabet (A–Z): ISL fingerspelling | Numbers (0–9): ISL digits 0 to 9 | Finger Count: 3D geometric finger count (0–5)",
+                info="Alphabet (A–Z): ISL fingerspelling (26 classes) | Numbers (0–9): ISL digits (10 classes)",
             )
 
         with gr.Row():

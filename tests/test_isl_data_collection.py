@@ -9,13 +9,29 @@ from isl_data_collection.config import FEATURE_DIM, SEQUENCE_LENGTH
 class CoreWorkflowTests(unittest.TestCase):
     def test_alphabet_label_validation(self):
         self.assertEqual(validate_label("alphabet", "a"), ("alphabet", "A"))
+        self.assertEqual(validate_label("alphabet", "z"), ("alphabet", "Z"))
         with self.assertRaises(ValueError):
             validate_label("alphabet", "HELLO")
+        with self.assertRaises(ValueError):
+            validate_label("alphabet", "1")
 
     def test_number_label_validation(self):
-        self.assertEqual(validate_label("number", "two"), ("number", "TWO"))
+        # Verify all ten number classes (0 to 9)
+        for i in range(10):
+            self.assertEqual(validate_label("number", str(i)), ("number", str(i)))
+
+        # Verify source word normalization to digits
+        self.assertEqual(validate_label("number", "two"), ("number", "2"))
+        self.assertEqual(validate_label("number", "ZERO"), ("number", "0"))
+        self.assertEqual(validate_label("number", "nine"), ("number", "9"))
+
+        # Verify invalid and out-of-range labels are rejected
+        with self.assertRaises(ValueError):
+            validate_label("number", "10")
         with self.assertRaises(ValueError):
             validate_label("number", "HELLO")
+        with self.assertRaises(ValueError):
+            validate_label("number", "-1")
 
     def test_word_label_validation(self):
         self.assertEqual(validate_label("word", "thank you"), ("word", "THANK_YOU"))
@@ -33,4 +49,3 @@ class CoreWorkflowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

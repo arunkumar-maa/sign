@@ -206,8 +206,36 @@ class CharacterTextBuilder:
         return None
 
     # Compatibility aliases for SentenceBuilder callers
+    @property
+    def words(self) -> List[str]:
+        return [entry.character for entry in self._history]
+
+    @property
+    def gloss_sequence(self) -> List[str]:
+        return [entry.character for entry in self._history]
+
     def add_word(self, word: Optional[str], confidence: float = 1.0) -> bool:
-        return self.add_character(word, confidence=confidence)
+        if not word:
+            return False
+        clean = str(word).strip()
+        if not clean:
+            return False
+        # If single char
+        if len(clean) == 1 and clean.upper() in VALID_CHARACTERS:
+            return self.add_character(clean.upper(), confidence=confidence)
+        # Multi-char word (e.g. from tests or glosses)
+        now = time.perf_counter()
+        token = clean.capitalize()
+        if self._text:
+            self._text += " " + token
+        else:
+            self._text = token
+        self._history.append(CharacterEntry(character=token, confidence=confidence, timestamp=now))
+        self._last_added_time = now
+        return True
+
+    def accept_current_sign(self, sign: Optional[str], confidence: float = 1.0) -> bool:
+        return self.add_character(sign, confidence=confidence)
 
     def undo(self) -> str:
         return self.backspace()
@@ -217,3 +245,15 @@ class CharacterTextBuilder:
 
     def set_user_text(self, text: str) -> str:
         return self.set_text(text)
+
+    def process_frame_auto_add(
+        self,
+        candidate_sign: Optional[str],
+        confidence: float,
+        hand_present: bool = True,
+    ) -> Optional[str]:
+        return self.process_auto_frame(
+            character_candidate=candidate_sign,
+            confidence=confidence,
+            hand_detected=hand_present,
+        )

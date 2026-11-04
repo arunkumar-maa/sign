@@ -1,6 +1,6 @@
 # SignBridge AI — Real-Time Indian Sign Language (ISL) Recognition
 
-SignBridge AI is an AI-powered Indian Sign Language (ISL) recognition and assistive communication platform built in Python. It detects hands in real-time from a webcam, extracts MediaPipe hand landmark geometry, and classifies signs using deep learning.
+SignBridge AI is an AI-powered Indian Sign Language (ISL) recognition and assistive communication platform built strictly in Python. It detects hands in real-time from a webcam, extracts MediaPipe hand landmark geometry, and classifies signs using deep learning.
 
 ---
 
@@ -14,20 +14,23 @@ SignBridge AI focuses exclusively on **character-by-character real-time Indian S
    - Recognizes standard ISL number signs (0 through 9).
 3. **Character-by-Character Text Generation**:
    - Recognized characters assemble sequentially into readable text (e.g., `HELLO123`).
-   - Supports manual confirmation, auto-add stabilization with neutral release gating, backspace, clear, multilingual translation, and local text-to-speech (TTS).
+   - Supports manual confirmation, auto-add stabilization with neutral release gating, backspace, clear text, multilingual translation, and local text-to-speech (TTS).
+
+> [!NOTE]
+> Large-vocabulary word recognition, gloss translation, and sentence-level word vocabularies are **not** part of the active pipeline. All historical word-mode modules are decoupled and retained only as unimported reference files.
 
 ---
 
 ## 2. Key Features
 
-- **Single Camera Interface**: Displays one unified webcam stream with high-contrast green landmark dots (radius 5) and blue skeleton connection lines.
+- **Single Camera Interface**: Displays exactly one unified webcam stream with high-contrast green landmark dots (radius 5) and blue skeleton connection lines.
 - **Unified Feature Schema (v2.0.0)**: Fixed 282-dimensional feature vector (140 Left Hand + 140 Right Hand + 2 Hand Presence Flags) shared identically across training and live inference.
 - **Strict Model Compatibility**: Explicitly rejects incompatible models (`IncompatibleModelError`); never silently pads, truncates, or slices feature dimensions.
-- **Genuine Confidence Gating**: Unrecognized or low-confidence hand poses report `Unknown Sign`, preventing arbitrary word guesses on arbitrary finger poses.
+- **Genuine Confidence Gating**: Unrecognized or low-confidence hand poses report `Unknown Sign`, preventing arbitrary guesses on random handshapes.
 - **Character Text Builder**: Add Character, Backspace, Clear Text, and Auto-Add with mandatory neutral hand release to prevent runaway duplicate characters (e.g., prevents `AAAAA`).
 - **Per-Session State Isolation**: Gradio `gr.State` isolates recognition pipeline instances per user connection, preventing cross-user text contamination.
-- **Multilingual Translation & TTS**: Translates text to Tamil, Hindi, Telugu, Malayalam, Kannada, and English with offline dictionary fallback and speech synthesis.
-- **Complete Test Coverage**: 100+ automated unit and integration tests passing with 0 failures across all 15 audit dimensions.
+- **Multilingual Translation & TTS**: Translates assembled text to Tamil, Hindi, Telugu, Malayalam, Kannada, and English with offline dictionary fallback and speech synthesis.
+- **Comprehensive Verification**: 100% automated test pass rate across all unit and integration test suites.
 
 ---
 
@@ -66,14 +69,13 @@ flowchart TD
     
     Buffer --> ModeDispatch{"Active Recognition Mode"}
     
-    ModeDispatch -->|"Alphabet (A-Z)"| BiLSTM_Alph["BiLSTM Alphabet Model (26 classes)"]
-    ModeDispatch -->|"Numbers (0-9)"| BiLSTM_Num["BiLSTM Number Model (10 classes)"]
-    ModeDispatch -->|"Finger Count"| FC["3D Geometric Finger Counter (0-5)"]
+    ModeDispatch -->|"Alphabet (A–Z)"| BiLSTM_Alph["BiLSTM Alphabet Model (26 classes)"]
+    ModeDispatch -->|"Numbers (0–9)"| BiLSTM_Num["BiLSTM Number Model (10 classes)"]
     
-    BiLSTM_Alph --> ConfCheck{"Confidence >= 0.50?"}
+    BiLSTM_Alph --> ConfCheck{"Confidence >= Threshold?"}
     BiLSTM_Num --> ConfCheck
     
-    ConfCheck -->|Yes| OutputChar["Predicted Character (A-Z or 0-9)"]
+    ConfCheck -->|Yes| OutputChar["Predicted Character (A–Z or 0–9)"]
     ConfCheck -->|No| OutputUnknown["Unknown Sign"]
     
     OutputChar --> Builder["Character Text Builder"]
@@ -84,52 +86,24 @@ flowchart TD
 
 ---
 
-## 5. Repository Structure
+## 5. Model Weights & MediaPipe Asset Policy
 
+> [!IMPORTANT]
+> Model weights (`.keras`, `.h5`), task binaries (`.task`), and raw dataset arrays (`.npz`) are **intentionally excluded from Git** via `.gitignore` to comply with Git repository file size best practices. They are never claimed to be checked into the Git repository.
+
+### Reproducible Asset Setup
+
+Run the unified asset setup script to download MediaPipe task binaries and verify model availability:
+
+```powershell
+# 1. Download official MediaPipe hand_landmarker.task and verify model schemas
+python scripts/setup_assets.py
+
+# 2. To automatically train missing models from dataset manifests:
+python scripts/setup_assets.py --train
 ```
-sign 2/
-├── app.py                                # Main application entry point (FastAPI + Gradio)
-├── config.py                             # Central configuration and environment settings
-├── backend/
-│   ├── main.py                           # FastAPI application and Lifespan service manager
-│   ├── api/                              # REST API endpoints (health, recognition, speech, translation)
-│   ├── vision/
-│   │   ├── feature_schema.py             # CANONICAL Feature Schema v2.0.0 (282-dim extractor)
-│   │   ├── hand_landmarks.py             # MediaPipe Tasks HandLandmarker wrapper
-│   │   ├── live_pipeline.py              # Real-time multi-mode processing pipeline
-│   │   └── performance_monitor.py        # Sub-millisecond latency profiler
-│   ├── recognition/
-│   │   ├── isl_fingerspelling_recognizer.py # ISL Alphabet Recognizer (A–Z)
-│   │   ├── isl_number_recognizer.py      # ISL Number Recognizer (0–9)
-│   │   ├── character_builder.py          # Character Text Builder (Add, Backspace, Clear, Auto-Add)
-│   │   └── finger_counter.py             # 3D invariant geometric finger counter (0–5)
-│   ├── audio/                            # Text-to-Speech (Edge-TTS and gTTS fallback)
-│   ├── database/                         # SQLite conversation storage
-│   └── translation/                      # Multilingual translation service
-├── frontend/
-│   ├── translator_ui.py                  # Live ISL Camera & Character Builder UI (session-isolated)
-│   ├── home.py, about_ui.py, etc.        # Auxiliary frontend tabs
-├── isl_data_collection/                  # Dedicated ISL Alphabet & Numbers dataset recording tab
-├── models/
-│   ├── isl_fingerspelling_model.keras    # Trained BiLSTM Alphabet model (None, 30, 282 -> 26)
-│   ├── isl_number_model.keras            # Trained BiLSTM Number model (None, 30, 282 -> 10)
-│   ├── fingerspelling_labels.json        # Alphabet 26-class mapping
-│   ├── number_labels.json                # Numbers 10-class mapping
-│   └── hand_landmarker.task              # MediaPipe Tasks Hand Landmarker model
-├── scripts/
-│   ├── train_alphabet.py                 # Standalone Alphabet training script
-│   ├── train_numbers.py                  # Standalone Numbers training script
-│   ├── import_fingerspelling.py          # Fingerspelling dataset downloader & extractor
-│   └── import_number_datasets.py         # ISLRTC numbers downloader & extractor
-├── tests/
-│   ├── test_alphabet_and_numbers_suite.py# 15-Area comprehensive verification suite
-│   ├── test_feature_schema.py            # Feature schema & dimension tests
-│   ├── test_character_builder.py         # Character text builder & auto-add tests
-│   └── ...                               # 101 automated pytest test cases
-├── docs/
-│   └── project_audit.md                  # Comprehensive architectural audit and repair report
-└── README.md
-```
+
+If model files are not present on disk, the UI gracefully displays **"Model Not Available"** with actionable guidance instead of throwing unhandled exceptions or making fake predictions.
 
 ---
 
@@ -158,6 +132,11 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+### Step 4: Setup Assets
+```powershell
+python scripts/setup_assets.py
+```
+
 ---
 
 ## 7. Launching the Application
@@ -178,9 +157,8 @@ python app.py
 1. Open [http://localhost:7861](http://localhost:7861) in your browser.
 2. Select the **"🎥 Live ISL Translator"** tab.
 3. Choose your desired recognition mode:
-   - **Alphabet (A–Z)**: For spelling English words using ISL fingerspelling.
-   - **Numbers (0–9)**: For ISL numbers.
-   - **Finger Count (Diagnostic)**: To view exact count of extended fingers.
+   - **Alphabet (A–Z)**: For spelling English words using ISL fingerspelling (26 classes).
+   - **Numbers (0–9)**: For ISL numbers (10 classes: 0 through 9).
 4. Under the camera accordion, click the webcam icon to grant camera permissions.
 5. The live camera feed displays your video with green landmark dots on your knuckles/fingertips and blue skeleton connection lines.
 6. **Assembling Text**:
@@ -201,43 +179,42 @@ python app.py
    - *Quality check:* Samples without valid hand landmarks are automatically rejected to prevent corrupted data.
 5. Click **"Extract Hand Landmarks"** to convert saved clips to 282-dim sequences via `backend/vision/feature_schema.py`.
 
-### Standalone Model Training
+### Standalone Model Training (Strict Signer-Independent Splits)
 Run dedicated training scripts directly from PowerShell:
 
 ```powershell
-# Train Alphabet Model (A–Z)
+# Train Alphabet Model (A–Z, 26 classes) - Strictly evaluated on held-out signer_02
 python scripts/train_alphabet.py --epochs 25 --batch-size 16
 
-# Train Numbers Model (0–9)
+# Train Numbers Model (0–9, 10 classes) - Strictly evaluated on held-out signers
 python scripts/train_numbers.py --epochs 30 --batch-size 16
 ```
 
-Models and metadata are automatically verified and saved to `models/isl_fingerspelling_model.keras` and `models/isl_number_model.keras`.
+Both scripts:
+- Enforce genuine 3-way signer-independent partitioning (Train, Validation, Test).
+- Prohibit random `train_test_split` fallbacks.
+- Require at least 3 distinct signer IDs in the dataset or fail immediately with an informative error.
+- Record train signers, validation signers, test signers, and per-class test sample counts in `models/*/evaluation.json`.
 
 ---
 
 ## 10. Running Automated Tests
 
-Run the full automated test suite (101 tests):
+Run the full automated test suite:
 
 ```powershell
+# Run Alphabet & Numbers comprehensive verification suite
 python -m pytest tests/test_alphabet_and_numbers_suite.py -v
+
+# Run full project test suite
 python -m pytest -v
 ```
 
-All 15 required audit areas are tested, including:
-- Alphabet & number label mappings
+All audit areas are covered:
+- Alphabet & number label mappings (26 letters, 10 digits)
 - 282-dim feature schema parity
 - Missing hand and corrupted sample rejection
-- Rejection of incompatible model architectures
+- Incompatible model architecture detection
 - Low-confidence `Unknown` gating
 - Character builder, backspace, clear, and auto-add stabilization
 - Model input/output dimensions and camera pipeline integration
-
----
-
-## 11. Known Limitations
-
-1. **Camera Lighting & Background**: High contrast with hands clearly separated from backgrounds provides optimal MediaPipe hand tracking. Avoid extreme backlighting.
-2. **Two-Hand Occlusion**: When both hands cross directly over each other in front of the lens, landmark tracking may momentarily drop to one hand until separated.
-3. **TTS Internet Access**: Edge-TTS and gTTS require an active internet connection to download audio streams; offline TTS fallback uses system pyttsx3 when configured.
