@@ -32,9 +32,22 @@ class Database:
 
     def __init__(self, db_path: Path):
         self._db_path = db_path
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
-        logger.info("Database ready at %s", db_path)
+        try:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._init_db()
+            logger.info("Database ready at %s", db_path)
+        except Exception as exc:
+            logger.warning("Could not initialize database at %s (%s). Falling back to /tmp/signbridge.db or :memory:", db_path, exc)
+            fallback = Path("/tmp/signbridge.db")
+            try:
+                fallback.parent.mkdir(parents=True, exist_ok=True)
+                self._db_path = fallback
+                self._init_db()
+                logger.info("Fallback database ready at %s", fallback)
+            except Exception as exc2:
+                logger.warning("Could not initialize fallback database (%s). Falling back to in-memory SQLite.", exc2)
+                self._db_path = Path(":memory:")
+                self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self._db_path))

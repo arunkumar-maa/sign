@@ -4,6 +4,7 @@ Services are initialised once and stored as module-level singletons.
 """
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -30,9 +31,32 @@ _animation_mapper = None
 
 
 def get_static_recognizer():
+    global _static_recognizer
+    if _static_recognizer is None:
+        try:
+            from backend.recognition.static_recognizer import StaticRecognizer
+            _static_recognizer = StaticRecognizer(
+                model_path=cfg.STATIC_MODEL_PATH,
+                labels_path=cfg.STATIC_LABELS_PATH,
+                confidence_threshold=cfg.STATIC_CONFIDENCE_THRESHOLD,
+            )
+        except Exception as exc:
+            logger.error("Failed to init static recognizer: %s", exc)
     return _static_recognizer
 
 def get_dynamic_recognizer():
+    global _dynamic_recognizer
+    if _dynamic_recognizer is None:
+        try:
+            from backend.recognition.dynamic_recognizer import DynamicRecognizer
+            _dynamic_recognizer = DynamicRecognizer(
+                model_path=cfg.DYNAMIC_MODEL_PATH,
+                labels_path=cfg.DYNAMIC_LABELS_PATH,
+                sequence_length=cfg.DYNAMIC_SEQUENCE_LENGTH,
+                confidence_threshold=cfg.DYNAMIC_CONFIDENCE_THRESHOLD,
+            )
+        except Exception as exc:
+            logger.error("Failed to init dynamic recognizer: %s", exc)
     return _dynamic_recognizer
 
 def get_translation_service():
@@ -51,33 +75,17 @@ def get_animation_mapper():
     return _animation_mapper
 
 
-def _init_services():
+def _init_services(eager_ml: bool = True):
     """Initialise all backend services at startup."""
     global _static_recognizer, _dynamic_recognizer, _translation_service
     global _tts_service, _stt_service, _database, _animation_mapper
 
-    # Static recognizer
-    try:
-        from backend.recognition.static_recognizer import StaticRecognizer
-        _static_recognizer = StaticRecognizer(
-            model_path=cfg.STATIC_MODEL_PATH,
-            labels_path=cfg.STATIC_LABELS_PATH,
-            confidence_threshold=cfg.STATIC_CONFIDENCE_THRESHOLD,
-        )
-    except Exception as exc:
-        logger.error("Failed to init static recognizer: %s", exc)
-
-    # Dynamic recognizer
-    try:
-        from backend.recognition.dynamic_recognizer import DynamicRecognizer
-        _dynamic_recognizer = DynamicRecognizer(
-            model_path=cfg.DYNAMIC_MODEL_PATH,
-            labels_path=cfg.DYNAMIC_LABELS_PATH,
-            sequence_length=cfg.DYNAMIC_SEQUENCE_LENGTH,
-            confidence_threshold=cfg.DYNAMIC_CONFIDENCE_THRESHOLD,
-        )
-    except Exception as exc:
-        logger.error("Failed to init dynamic recognizer: %s", exc)
+    # Static and dynamic recognizers (lazy-loaded if running in serverless / Vercel)
+    if eager_ml and not os.getenv("VERCEL"):
+        get_static_recognizer()
+        get_dynamic_recognizer()
+    else:
+        logger.info("Deferred ML recognizer loading (serverless cold start optimization)")
 
     # Translation service
     try:
@@ -142,7 +150,7 @@ async def lifespan(app: FastAPI):
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
-    _init_services()
+    _init_services(eager_ml=not bool(os.getenv("VERCEL")))
     yield
 
 

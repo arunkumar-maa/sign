@@ -31,7 +31,10 @@ STATIC_LABELS_PATH = Path(os.getenv("STATIC_LABELS_PATH", str(MODELS_DIR / "labe
 DYNAMIC_LABELS_PATH = Path(os.getenv("DYNAMIC_LABELS_PATH", str(MODELS_DIR / "labels" / "dynamic_labels.json")))
 
 # Database
-DB_PATH = Path(os.getenv("DB_PATH", str(DATA_DIR / "signbridge.db")))
+if os.getenv("VERCEL"):
+    DB_PATH = Path(os.getenv("VERCEL_DB_PATH", "/tmp/signbridge.db"))
+else:
+    DB_PATH = Path(os.getenv("DB_PATH", str(DATA_DIR / "signbridge.db")))
 
 # Animation manifest
 ANIMATION_MANIFEST_PATH = ASSETS_DIR / "animations" / "manifest.json"
