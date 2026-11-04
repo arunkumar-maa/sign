@@ -1,9 +1,45 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "signbridge-ai"
 version = "2.0.0"
 description = "SignBridge AI — Indian Sign Language Alphabet and Numbers Recognition"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.6",
+    "python-multipart>=0.0.12",
+    "python-dotenv>=1.0.1",
+    "requests>=2.32.3",
+    "numpy>=1.26.4,<2.0.0",
+    "opencv-python-headless>=4.10.0.84; sys_platform != 'win32'",
+    "opencv-python>=4.10.0.84; sys_platform == 'win32'",
+    "mediapipe>=0.10.18",
+    "edge-tts>=7.3.1",
+    "gTTS>=2.5.4",
+    "tensorflow-cpu==2.16.1; sys_platform != 'win32'",
+    "tensorflow==2.16.1; sys_platform == 'win32'",
+    "tensorflow-intel==2.16.1; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+stt = [
+    "faster-whisper>=1.2.1",
+    "ctranslate2>=4.8.5",
+]
+frontend = [
+    "gradio>=4.44.1",
+    "matplotlib>=3.9.2",
+    "pandas>=2.2.3",
+    "scikit-learn>=1.5.2",
+    "pillow>=10.4.0",
+]
+dev = [
+    "pytest>=8.3.3",
+]
 
 [tool.vercel]
 entrypoint = "backend.main:app"
