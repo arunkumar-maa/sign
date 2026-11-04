@@ -281,3 +281,4 @@ def test_15_camera_pipeline_integration():
     # Number mode
     res_num = pipeline.process_frame(frame, mode="Numbers (0–9)")
     assert res_num["annotated_frame"] is not None
+

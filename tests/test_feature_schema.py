@@ -178,3 +178,4 @@ def test_training_and_inference_feature_parity():
     features_b, _ = extract_frame_features(MockResult())
 
     assert np.allclose(features_a, features_b, atol=1e-7)
+

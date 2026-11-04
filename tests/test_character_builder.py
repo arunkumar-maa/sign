@@ -98,3 +98,4 @@ def test_character_builder_auto_add_and_neutral_release():
     res = builder.process_auto_frame("A", confidence=0.85, hand_detected=True)
     assert res == "A"
     assert builder.text == "AA"
+

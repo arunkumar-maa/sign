@@ -94,3 +94,4 @@ The previous word-based sentence assembler is replaced with a **Character Text B
 - [ ] Clean backend initialization in `app.py` and `backend/main.py`.
 - [ ] Run complete automated test suite across all 15 audit areas.
 - [ ] Update `README.md` with complete architecture, instructions, and Windows PowerShell commands.
+
