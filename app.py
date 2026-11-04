@@ -1,18 +1,19 @@
 """
-SignBridge AI — Main application entry point.
-Starts FastAPI backend and Gradio frontend in a single process.
+SignBridge AI — Unified Application Entry Point.
+Mounts the complete Gradio UI onto the FastAPI backend into a single ASGI application.
 
 Usage:
-    .venv/Scripts/python.exe app.py
+    python app.py
+    uvicorn app:app --host 0.0.0.0 --port $PORT
 """
 
 import logging
+import os
 import sys
-import threading
 from pathlib import Path
 
 # Add project root to Python path
-_ROOT = Path(__file__).parent
+_ROOT = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
@@ -20,10 +21,7 @@ import uvicorn
 import gradio as gr
 
 import config as cfg
-from backend.main import app as fastapi_app
-
-# Top-level ASGI FastAPI instance for deployment platforms (e.g. Vercel) and ASGI servers
-app = fastapi_app
+from backend.main import create_app
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,7 +32,7 @@ logger = logging.getLogger("signbridge")
 
 
 def build_gradio_app() -> gr.Blocks:
-    """Build the complete Gradio Blocks application."""
+    """Build the complete Gradio Blocks application preserving all tabs and components."""
     from frontend.home import build_home_tab
     from frontend.diagnostics_ui import build_diagnostics_tab
     from frontend.translator_ui import build_translator_tab
@@ -73,39 +71,35 @@ def build_gradio_app() -> gr.Blocks:
             "**Privacy:** Webcam frames are processed locally. "
             "No video is stored without your consent. "
             "TTS and translation require internet access. "
-            "API docs: [/api/docs](/api/docs)"
+            "API docs: [/api/docs](/api/docs) &nbsp;|&nbsp; API info: [/api/info](/api/info)"
         )
 
     return demo
 
 
-def start_fastapi():
-    """Run FastAPI in a background thread."""
-    uvicorn.run(
-        fastapi_app,
-        host=cfg.API_HOST,
-        port=cfg.API_PORT,
-        log_level="info",
-    )
+def create_unified_app():
+    """
+    Create and configure the unified FastAPI + Gradio ASGI application.
+    Mounts Gradio Blocks at '/' and preserves FastAPI endpoints at '/api/*'.
+    """
+    fastapi_app = create_app()
+    gradio_blocks = build_gradio_app()
+    # Mount Gradio Blocks application at root '/'
+    unified_app = gr.mount_gradio_app(fastapi_app, gradio_blocks, path="/")
+    return unified_app
+
+
+# Top-level ASGI application instance for Uvicorn
+app = create_unified_app()
 
 
 if __name__ == "__main__":
-    logger.info("Starting SignBridge AI...")
-    logger.info("FastAPI will be available at http://%s:%d/api/docs", cfg.API_HOST, cfg.API_PORT)
-    logger.info("Gradio will be available at http://%s:%d", cfg.GRADIO_HOST, cfg.GRADIO_PORT)
+    port = int(os.environ.get("PORT", cfg.API_PORT))
+    host = os.environ.get("HOST", "0.0.0.0")
+    logger.info("Starting SignBridge AI unified application on http://%s:%d...", host, port)
+    logger.info("  - Homepage (Gradio UI): http://%s:%d/", host, port)
+    logger.info("  - API Documentation:   http://%s:%d/api/docs", host, port)
+    logger.info("  - API Health Check:    http://%s:%d/api/health", host, port)
+    logger.info("  - API Information:     http://%s:%d/api/info", host, port)
 
-    # Start FastAPI in background thread
-    api_thread = threading.Thread(target=start_fastapi, daemon=True)
-    api_thread.start()
-    logger.info("FastAPI started on port %d", cfg.API_PORT)
-
-    # Build and launch Gradio (blocking)
-    demo = build_gradio_app()
-    demo.launch(
-        server_name=cfg.GRADIO_HOST,
-        server_port=cfg.GRADIO_PORT,
-        share=cfg.GRADIO_SHARE,
-        show_error=True,
-        favicon_path=None,
-    )
-
+    uvicorn.run(app, host=host, port=port, log_level="info")

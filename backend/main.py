@@ -188,8 +188,8 @@ def create_app() -> FastAPI:
     app.include_router(speech_router, prefix=prefix, tags=["Audio"])
     app.include_router(conversations_router, prefix=prefix, tags=["History"])
 
-    @app.get("/", tags=["Root"])
-    def read_root():
+    @app.get("/api/info", tags=["Info"])
+    def read_info():
         return {
             "name": "SignBridge AI API",
             "version": "2.0.0",

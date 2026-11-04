@@ -20,7 +20,7 @@ huggingface-hub==0.25.2
 click==8.1.8
 
 # Machine Learning (TensorFlow CPU for Windows native compatibility & Linux)
-tensorflow==2.16.1
+tensorflow-cpu==2.16.1; sys_platform != 'win32'
 tensorflow-intel==2.16.1; sys_platform == 'win32'
 
 # Speech Synthesis (TTS)

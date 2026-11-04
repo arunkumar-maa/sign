@@ -40,10 +40,10 @@ else:
 ANIMATION_MANIFEST_PATH = ASSETS_DIR / "animations" / "manifest.json"
 
 # ── Server ────────────────────────────────────────────────────────────────────
-API_HOST = os.getenv("API_HOST", "0.0.0.0")
-API_PORT = int(os.getenv("API_PORT", "8001"))
-GRADIO_HOST = os.getenv("GRADIO_HOST", "0.0.0.0")
-GRADIO_PORT = int(os.getenv("GRADIO_PORT", "7861"))
+API_HOST = os.getenv("HOST", os.getenv("API_HOST", "0.0.0.0"))
+API_PORT = int(os.getenv("PORT", os.getenv("API_PORT", "8001")))
+GRADIO_HOST = os.getenv("HOST", os.getenv("GRADIO_HOST", "0.0.0.0"))
+GRADIO_PORT = int(os.getenv("PORT", os.getenv("GRADIO_PORT", "7861")))
 GRADIO_SHARE = os.getenv("GRADIO_SHARE", "false").lower() == "true"
 ALLOWED_ORIGINS = [
     origin.strip() for origin in os.getenv(
